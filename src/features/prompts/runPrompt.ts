@@ -19,7 +19,7 @@ function runTitle(name: string, detail: string): string {
   return `${name}: ${short}`;
 }
 
-export type ResolvedPrompt = { text: string; title: string };
+type ResolvedPrompt = { text: string; title: string };
 
 export async function resolveCustomPrompt(
   workstreamId: string,

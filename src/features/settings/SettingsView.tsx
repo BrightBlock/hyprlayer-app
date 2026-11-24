@@ -16,7 +16,7 @@ import { NotificationsSettings } from "./NotificationsSettings";
 import type { SettingsSection } from "./sections";
 import { SettingsNav } from "./SettingsNav";
 
-/** The full Settings view. Servers comes from the hosts feature as a slot. */
+/** Servers comes from the hosts feature as a slot. */
 export function SettingsView({
   section,
   onSection,

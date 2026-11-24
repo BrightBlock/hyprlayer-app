@@ -65,10 +65,6 @@ vi.mock("@tauri-apps/plugin-dialog", () => ({
   open: (...args: unknown[]) => openDialog(...(args as [])),
 }));
 
-// Phase 6 moved the file I/O to the client and the prompts themselves over the
-// wire, so the flow is now five calls across two machines. Nothing here covered
-// it — an audit on 2026-09-16 found this file never mocked `commands` at all and
-// never reached the import/export code, so it passed without exercising it.
 const ipc = vi.hoisted(() => ({
   exportPrompts: vi.fn(),
   writePromptExport: vi.fn(),

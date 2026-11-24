@@ -1,7 +1,7 @@
 import type { AgentBundleStatus, AiStatus, AiVersionEntry, AiVersions } from "@/lib/bindings";
 import type { DropdownOption } from "@/components/ui";
 
-export type BundlePinState =
+type BundlePinState =
   | { kind: "unavailable" }
   | { kind: "unpinned"; installed: string | null; binary: string | null }
   | {
@@ -76,7 +76,7 @@ export function needsSkillsCliUpdate(version: string | null | undefined): boolea
   return false;
 }
 
-export type BundleLayout = "managed" | "unpaired" | "legacy";
+type BundleLayout = "managed" | "unpaired" | "legacy";
 
 /**
  * Why the reported install does or doesn't support switching bundle versions.

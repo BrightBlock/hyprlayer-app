@@ -1,13 +1,13 @@
-export const DEFAULT_TAB_TITLE_MODEL = "claude:haiku";
-export const DEFAULT_CODEX_TAB_TITLE_MODEL = "codex:gpt-5.4-mini";
+const DEFAULT_TAB_TITLE_MODEL = "claude:haiku";
+const DEFAULT_CODEX_TAB_TITLE_MODEL = "codex:gpt-5.4-mini";
 
 /** The `<select>` value for "no pin": core then follows the default harness. */
 export const FOLLOW_HARNESS = "";
 
-export type TitleModelOption = { value: string; label: string };
-export type TitleModelGroup = { label: string; options: TitleModelOption[] };
+type TitleModelOption = { value: string; label: string };
+type TitleModelGroup = { label: string; options: TitleModelOption[] };
 
-export function defaultTitleModel(defaultHarness: string | null | undefined): string {
+function defaultTitleModel(defaultHarness: string | null | undefined): string {
   return defaultHarness === "codex" ? DEFAULT_CODEX_TAB_TITLE_MODEL : DEFAULT_TAB_TITLE_MODEL;
 }
 

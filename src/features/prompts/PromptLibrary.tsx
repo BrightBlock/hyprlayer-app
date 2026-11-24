@@ -241,7 +241,7 @@ export function PromptLibrary({
 
   const isBuiltin = selection.kind === "builtin";
   const builtinDef = isBuiltin
-    ? BUILTIN_PROMPTS.find((b) => b.id === (selection as { id: BuiltinPromptId }).id)!
+    ? BUILTIN_PROMPTS.find((b) => b.id === selection.id)!
     : null;
   const selPrompt = selection.kind === "custom" ? selection.prompt : null;
   const selName = builtinDef ? builtinDef.name : (selPrompt?.name ?? "");

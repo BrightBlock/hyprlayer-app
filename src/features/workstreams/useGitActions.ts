@@ -28,7 +28,7 @@ export function newestImplementSession(sessions: Session[]): Session | null {
 }
 
 // A row's `working` only refreshes on lifecycle events, so a loaded entry wins over it.
-export function useImplementWorking(workstreamId: string, enabled = true): boolean {
+function useImplementWorking(workstreamId: string, enabled = true): boolean {
   const sessions = useWorkstreamSessions(workstreamId, enabled);
   const newest = newestImplementSession(sessions.data ?? []);
   const storeWorking = useSessionStore((s) =>

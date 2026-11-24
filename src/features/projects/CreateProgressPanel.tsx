@@ -1,7 +1,7 @@
 import type { CreateStep, ProjectCreateProgress, StepStatus } from "@/lib/bindings";
 import { StepList, StepRow } from "@/components/ui";
 
-export type StepState = { status: StepStatus; detail: string | null };
+type StepState = { status: StepStatus; detail: string | null };
 export type ProgressMap = Partial<Record<CreateStep, StepState>>;
 
 export function applyProgress(prev: ProgressMap, event: ProjectCreateProgress): ProgressMap {

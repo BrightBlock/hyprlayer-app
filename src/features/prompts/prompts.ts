@@ -206,7 +206,7 @@ export function prefillSlashCommand(draft: string, slug: string): string {
 }
 
 export function promptFirstLine(body: string): string {
-  return body.split("\n", 1)[0] ?? "";
+  return body.split("\n", 1)[0];
 }
 
 export function previewArgs(body: string): Record<string, string> {

@@ -56,10 +56,10 @@ export function RepoSourcePicker({
 
   useEffect(() => {
     if (!defaultLocation) return;
-    if (value.mode === "clone" && !(value as { mode: "clone"; url: string; location: string }).location) {
+    if (value.mode === "clone" && !value.location) {
       onChange({ mode: "clone", url: "", location: defaultLocation });
     }
-    if (value.mode === "create" && !(value as { mode: "create"; path: string }).path) {
+    if (value.mode === "create" && !value.path) {
       onChange({ mode: "create", path: defaultLocation });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

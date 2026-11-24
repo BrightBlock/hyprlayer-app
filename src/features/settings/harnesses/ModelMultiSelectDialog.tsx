@@ -3,7 +3,7 @@ import { useMemo, useState, type ReactNode } from "react";
 import { Button, Dialog, TextInput } from "@/components/ui";
 import { Icon } from "@/components/Icon";
 
-export type ModelRow = {
+type ModelRow = {
   id: string;
   name: string;
   detail?: string;

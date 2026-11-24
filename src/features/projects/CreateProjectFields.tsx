@@ -16,7 +16,7 @@ export type CreateSpec = {
   private: boolean;
 };
 
-export const GITIGNORE_TEMPLATES: Array<{ value: GitignoreTemplate; label: string }> = [
+const GITIGNORE_TEMPLATES: Array<{ value: GitignoreTemplate; label: string }> = [
   { value: "node", label: "Node" },
   { value: "rust", label: "Rust" },
   { value: "python", label: "Python" },
@@ -47,7 +47,7 @@ export function isReservedRepoName(name: string): boolean {
 // The owner list is owned by the dialog, not by this component: these fields
 // unmount when the wizard advances, and an owner resolved by an effect in here
 // would be lost for any create submitted before the query settled.
-export type OwnersState = {
+type OwnersState = {
   owners: GithubOwner[];
   loading: boolean;
   unreachable: boolean;

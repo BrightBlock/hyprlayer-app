@@ -507,11 +507,7 @@ describe("AddProjectDialog clone location default", () => {
 
   it("prefills the location the server reports, whichever machine that is", async () => {
     // A Linux root while this client runs on macOS: the point is that the
-    // answer comes from the machine the clone lands on. This used to be
-    // `join(homeDir(), "hyprlayer", "repos")` — *this* machine's home — which
-    // against a remote host prefilled `/Users/...` into a Linux server and
-    // failed at its unwritable root with a bare "Permission denied (os error
-    // 13)" naming no path.
+    // answer comes from the machine the clone lands on.
     q.useConnectionStatus.mockReturnValue({
       data: { host: { destination: "nexus", label: "Nexus" } },
     });

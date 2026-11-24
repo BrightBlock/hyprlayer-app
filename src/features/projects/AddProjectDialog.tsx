@@ -176,10 +176,7 @@ function AddProjectWizard({ onClose, initialUrl, initialMode, onAdded }: Props) 
     };
     // The server answers this, because only it can: it resolves the configured
     // `repos_root` or its own default, on the machine the clone actually lands
-    // on. This used to be `join(homeDir(), "hyprlayer", "repos")` — *this*
-    // machine's home — which against a remote host prefilled a macOS path into
-    // a Linux server and failed at its unwritable root with a bare
-    // "Permission denied (os error 13)" naming no path.
+    // on.
     const root = bootstrap.data?.defaultReposRoot;
     if (root) apply(root);
   }, [bootstrap.data?.defaultReposRoot]);

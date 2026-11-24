@@ -16,7 +16,7 @@ export function toggleCollapsedPath(paths: string[], path: string): string[] {
   return paths.includes(path) ? paths.filter((p) => p !== path) : [...paths, path];
 }
 
-export type NestedWorkstream = { view: WorkstreamView; depth: number; childCount: number };
+type NestedWorkstream = { view: WorkstreamView; depth: number; childCount: number };
 
 export function nestWorkstreams(
   views: WorkstreamView[],
