@@ -375,6 +375,37 @@ mod tests {
     }
 
     #[test]
+    fn concurrent_mapping_edits_keep_every_mapping() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.json");
+        std::fs::write(
+            &config_path,
+            r#"{"version":4,"thoughts":{"user":"jt","backend":{"kind":"git","thoughtsRepo":"~/thoughts","reposDir":"repos","globalDir":"global"},"repoMappings":{},"profiles":{}}}"#,
+        )
+        .unwrap();
+        let handles: Vec<_> = (0..8)
+            .map(|t| {
+                let config_path = config_path.clone();
+                std::thread::spawn(move || {
+                    for i in 0..25 {
+                        let wt = format!("/wt/t{t}-i{i}");
+                        add_worktree_mapping(&config_path, Path::new(&wt), "myproj", None).unwrap();
+                    }
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+        assert_eq!(
+            value["thoughts"]["repoMappings"].as_object().unwrap().len(),
+            200
+        );
+    }
+
+    #[test]
     fn mapping_edits_never_rewrite_foreign_schema_versions() {
         let dir = tempfile::tempdir().unwrap();
         let config_path = dir.path().join("config.json");

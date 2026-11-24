@@ -51,7 +51,10 @@ pub fn write_bootstrap_config(path: &Path, user: &str) -> Result<()> {
     ensure_thoughts_config(path, user, DEFAULT_THOUGHTS_REPO)
 }
 
+static CONFIG_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 pub fn ensure_thoughts_config(path: &Path, user: &str, thoughts_repo: &str) -> Result<()> {
+    let _write = CONFIG_WRITE.lock().unwrap_or_else(|e| e.into_inner());
     let user = user.trim();
     if user.is_empty() {
         return Err(CoreError::Io(std::io::Error::other(
@@ -157,6 +160,7 @@ pub(crate) fn edit_config(
     path: &Path,
     edit: impl FnOnce(&mut serde_json::Map<String, serde_json::Value>) -> Result<()>,
 ) -> Result<()> {
+    let _write = CONFIG_WRITE.lock().unwrap_or_else(|e| e.into_inner());
     let raw = std::fs::read_to_string(path).map_err(|e| {
         if e.kind() == std::io::ErrorKind::NotFound {
             CoreError::ConfigMissing {
