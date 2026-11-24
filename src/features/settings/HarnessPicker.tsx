@@ -29,7 +29,7 @@ function HarnessRadio({ value, onChange, disabled }: Omit<HarnessPickerProps, "v
             type="button"
             {...itemProps(i)}
             className={cx(
-              "flex h-[38px] min-w-0 items-center justify-center gap-2 rounded-control border bg-panel px-2 text-body transition-colors",
+              "flex h-[38px] min-w-0 items-center justify-center gap-2 rounded-control border bg-panel px-2 text-body",
               "focus:outline-none",
               "disabled:cursor-not-allowed disabled:opacity-50",
               selected

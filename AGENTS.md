@@ -128,7 +128,7 @@ automatically: **read the relevant ADR before changing its area.**
 | 0003 | frontend imports, registration seams | Imports point downward only; the foundation reaches features through seams wired in `main.tsx` |
 | 0004 | closed-vocabulary enums, naming | Vocabulary enums live in Rust with serde + specta; commands are `domain_verb`, PTY commands `pty_*` |
 | 0005 | git operations | git2 for local reads; the system `git` binary (`git_in`) for anything touching a remote |
-| 0006 | UI styling: dialogs, rows, hover, menus, type scale, icons | `Dialog` takes `size`, never a `max-w-*` class; rows use `rowClass`; floating panels use `Popover`; Tailwind's `text-xs`…`text-3xl` don't exist — use the named type tokens |
+| 0006 | UI styling: dialogs, rows, hover, menus, type scale, icons | `Dialog` takes `size`, never a `max-w-*` class; rows use `rowClass`; floating panels use `Popover`; Tailwind's `text-xs`…`text-3xl` don't exist — use the named type tokens; animate and transition only `transform` and `opacity` |
 | 0007 | stage guardrails, harness launch policy, codex | `capability::launch_policy` is the single stage → harness mapping; codex floor is 0.155.1 |
 | 0008 | crate boundaries, runtime facade, core hermeticity | No Tauri in core; no HTTP client or `Db` handle in the shell; core reads no ambient env/home paths |
 | 0009 | `hyprlayer-server`, RPC, remote hosts, server versioning | The runtime runs in the server; the desktop is always a client |

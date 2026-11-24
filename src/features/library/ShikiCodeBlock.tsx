@@ -55,7 +55,7 @@ function ShikiCodeBlockImpl({
         <button
           type="button"
           onClick={() => handleCopy(code)}
-          className="flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-label text-ink-dim opacity-0 transition hover:bg-edge hover:text-ink group-hover:opacity-100"
+          className="flex cursor-pointer items-center gap-1 rounded px-1.5 py-0.5 text-label text-ink-dim opacity-0 transition-opacity hover:bg-edge hover:text-ink group-hover:opacity-100"
           aria-label="Copy code"
         >
           <Icon name="copy" size="xs" />

@@ -59,3 +59,13 @@ export function planRevisions(items: TranscriptItem[], written: WrittenDocs): Ma
   cache.set(items, { written, revisions });
   return revisions;
 }
+
+export function sameRevisions(a: ReadonlyMap<string, PlanRevision>, b: ReadonlyMap<string, PlanRevision>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [id, x] of a) {
+    const y = b.get(id);
+    if (!y || x.planKey !== y.planKey || x.text !== y.text || x.superseded !== y.superseded || x.latest !== y.latest)
+      return false;
+  }
+  return true;
+}

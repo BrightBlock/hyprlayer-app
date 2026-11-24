@@ -49,7 +49,7 @@ function CaptionButton({
       aria-label={label}
       className="group inline-flex h-full w-9 items-center justify-center text-ink-dim"
     >
-      <span className="flex h-7 w-7 translate-y-px items-center justify-center rounded-full transition-colors group-hover:bg-edge/60 group-hover:text-ink">
+      <span className="flex h-7 w-7 translate-y-px items-center justify-center rounded-full group-hover:bg-edge/60 group-hover:text-ink">
         {children}
       </span>
     </button>

@@ -95,7 +95,7 @@ export function PipelineCard({
 
   // The fold sits outside the role="button", so it stays reachable and doesn't open the card.
   return (
-    <div className={`rounded-card border shadow-sm transition-colors ${frame}`}>
+    <div className={`rounded-card border shadow-sm ${frame}`}>
       <div
         role="button"
         tabIndex={0}
@@ -196,7 +196,7 @@ export function LeadCard({
       tabIndex={0}
       aria-label="Lead Engineer"
       {...cardEvents(view, live, handlers)}
-      className="block w-full cursor-pointer rounded-card border border-warn/40 bg-q-chip-bg/40 px-3 py-[11px] text-left shadow-sm transition-colors hover:border-warn/70"
+      className="block w-full cursor-pointer rounded-card border border-warn/40 bg-q-chip-bg/40 px-3 py-[11px] text-left shadow-sm hover:border-warn/70"
     >
       <span className="flex items-center gap-2">
         <LeadMark className="h-4 w-4" />

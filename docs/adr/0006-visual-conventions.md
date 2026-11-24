@@ -657,13 +657,41 @@ stays, `#[allow(dead_code)]`, because it's part of the specta-exported
   `animate-pop-in` (scale .96, `base`, origin at the anchor's edge); `Dialog` fades its scrim
   (`animate-fade-in`) and rises its panel (`animate-dialog-in`, 8px from .98, `gentle`).
   They have no exit animation yet: they unmount on close.
-- **Press, hover, focus.** `Button` and `IconButton` press to scale .97 and change hover
-  colour in `instant`, then settle back in `quick`; a keyboard-focus fill moves with them. They
-  never transition opacity and snap when disabled: WebKit leaves stale paint when an
-  animating button shifts layout (a busy spinner widening it).
+- **Press, hover, focus.** `Button` and `IconButton` press to scale .97 in `instant`, then
+  settle back in `quick`. Hover and focus colours change at once (see "Composited motion
+  only" below). They never transition opacity and snap when disabled: WebKit leaves stale
+  paint when an animating button shifts layout (a busy spinner widening it).
 - **Reduced motion.** The entrance classes become a 100ms fade; press scale is `motion-safe`.
   Spinners and the working pulses keep their own `prefers-reduced-motion` blocks.
 - `animate-step-in` runs at `slow` (first-run only) and `animate-sync-in` at `gentle`.
+
+### Composited motion only (2026-11-24)
+
+On Linux the app runs in WebKitGTK, with or without its GPU (DMA-BUF) renderer. Without it
+nothing is composited: each animated frame repaints and copies the whole window on the
+webview's main thread. With it, only `transform` and `opacity` run on the compositor; every
+other animated property still repaints on the main thread each frame.
+
+- **Nothing animates except `transform` (`translate`, `rotate`, `scale`) and `opacity`.**
+  This covers every `@keyframes`, every `transition` (class, stylesheet or inline style) and
+  every JS loop that drives motion with `requestAnimationFrame` or a timer. There are no
+  `transition-colors`, bare `transition` or `transition-all` utilities, and no transitions on
+  `width`, `height`, `box-shadow`, `background-*`, `color`, `stroke-*` or `filter`. Hover
+  and focus colours change at once.
+- **Restyle a paint property as a composited one.** Keep a glow as a static `box-shadow` and
+  pulse `opacity`. Fade a flash colour on a `::before` layer (`animate-plan-flash`). Slide a
+  panel or a progress bar with `translate` inside a clipping parent instead of sizing it
+  (`LeadDock`, `PlanProgressHeader`). Sweep a shimmer with `translateX` on an `::after`
+  layer.
+- **Animate HTML or `<svg>` boxes, not SVG children.** WebKit composites `opacity` on an
+  `<svg>` element but repaints it every frame on a `<path>`, so each pulsing layer of
+  `HyprlayerMark` is its own `<svg>`.
+- **No motion in text.** Streaming text shows as it arrives, a running clock ticks once a
+  second (`formatRunningElapsed`), and a new tab title fades in rather than typing out.
+- **Endless indicators** also pause while the window is in the background
+  (`data-window-blurred`), and hold a static look where the GPU renderer is off
+  (`data-still-motion`, set from `src-tauri/src/webkit_env.rs`).
+- **`src/lib/animationPolicy.test.ts` enforces this** for stylesheets and components.
 
 ### Workshop: three-pane shell (2026-10)
 

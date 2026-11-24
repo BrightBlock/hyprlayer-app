@@ -269,7 +269,7 @@ function ScaffoldChip({
       onClick={onClick}
       disabled={disabled}
       className={cx(
-        "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-meta font-medium transition-colors",
+        "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-meta font-medium",
         "disabled:cursor-not-allowed disabled:opacity-50",
         checked
           ? "border-accent/30 bg-accent/10 text-ink"
@@ -306,7 +306,7 @@ function VisibilityChip({
       onClick={onClick}
       disabled={disabled}
       className={cx(
-        "inline-flex items-center gap-1.5 rounded border px-2 py-1 text-ui font-medium transition-colors",
+        "inline-flex items-center gap-1.5 rounded border px-2 py-1 text-ui font-medium",
         "disabled:cursor-not-allowed disabled:opacity-50",
         selected
           ? "border-edge bg-panel-2 text-ink"

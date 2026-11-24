@@ -127,7 +127,7 @@ export function QuestionPrompt({
               disabled={submitted}
               onClick={() => toggle(opt.label)}
               aria-pressed={selected}
-              className={`flex w-full items-start gap-2.5 rounded-control border px-3 py-2 text-left transition-colors disabled:opacity-50 ${
+              className={`flex w-full items-start gap-2.5 rounded-control border px-3 py-2 text-left disabled:opacity-50 ${
                 selected
                   ? "border-accent bg-accent/15"
                   : "border-edge bg-panel-2 hover:border-edge hover:bg-edge/50"
@@ -155,7 +155,7 @@ export function QuestionPrompt({
           );
         })}
         <div
-          className={`rounded-control border transition-colors ${
+          className={`rounded-control border ${
             otherOpen
               ? "border-accent bg-accent/15"
               : "border-edge bg-panel-2 hover:border-edge hover:bg-edge/50"

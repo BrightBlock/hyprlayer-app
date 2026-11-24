@@ -1763,7 +1763,7 @@ export function ProjectPage() {
                             role="separator"
                             aria-orientation={row ? "vertical" : "horizontal"}
                             aria-label="Resize agent split"
-                            className={`absolute z-10 bg-transparent transition-colors hover:bg-edge/60 ${
+                            className={`absolute z-10 bg-transparent hover:bg-edge/60 ${
                               row
                                 ? "w-2 -translate-x-1/2 cursor-col-resize"
                                 : "h-2 -translate-y-1/2 cursor-row-resize"
@@ -1821,7 +1821,7 @@ export function ProjectPage() {
               role="separator"
               aria-orientation="vertical"
               aria-label="Resize diff sidebar"
-              className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
+              className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent hover:bg-edge/60"
               onPointerDown={startDiffResize}
             />
           )}

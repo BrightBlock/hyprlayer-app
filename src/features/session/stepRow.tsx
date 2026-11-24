@@ -21,9 +21,9 @@ export function StepChevron({
     reveal === "hover"
       ? open
         ? "rotate-90 text-ink-dim"
-        : "text-ink-dim/0 group-hover:text-ink-dim"
+        : "text-ink-dim opacity-0 group-hover:opacity-100"
       : `${open ? "rotate-90" : ""} text-ink-dim`;
   return (
-    <Icon name="chevronRight" size="xs" className={`ml-auto transition-all ${visibility}`} />
+    <Icon name="chevronRight" size="xs" className={`ml-auto transition-[opacity,rotate] ${visibility}`} />
   );
 }

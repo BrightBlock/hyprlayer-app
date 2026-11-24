@@ -1,18 +1,8 @@
-
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 
 import { consumeTabTitleAnimation } from "./tabTitles";
 
-const TYPE_MS = 28;
-
-function prefersReducedMotion(): boolean {
-  return (
-    typeof window !== "undefined" &&
-    typeof window.matchMedia === "function" &&
-    window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  );
-}
-
+// A freshly generated title fades in. Fading is composited; typing it out repainted the tab per letter.
 export function TabTitle({
   workstreamId,
   shellId,
@@ -22,50 +12,17 @@ export function TabTitle({
   shellId: number;
   title: string;
 }) {
-  const [display, setDisplay] = useState(title);
-  const [typing, setTyping] = useState(false);
-  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [fresh, setFresh] = useState(false);
 
-  useEffect(() => {
-    if (timer.current) clearInterval(timer.current);
-    const raf = requestAnimationFrame(() => {
-      const animate =
-        consumeTabTitleAnimation(workstreamId, shellId) && !prefersReducedMotion();
-      if (!animate) {
-        setDisplay(title);
-        setTyping(false);
-        return;
-      }
-      setTyping(true);
-      setDisplay("");
-      let i = 0;
-      timer.current = setInterval(() => {
-        i += 1;
-        setDisplay(title.slice(0, i));
-        if (i >= title.length) {
-          if (timer.current) clearInterval(timer.current);
-          timer.current = null;
-          setTyping(false);
-        }
-      }, TYPE_MS);
-    });
-    return () => {
-      cancelAnimationFrame(raf);
-      if (timer.current) clearInterval(timer.current);
-      timer.current = null;
-    };
+  useLayoutEffect(() => {
+    setFresh(consumeTabTitleAnimation(workstreamId, shellId));
   }, [title, workstreamId, shellId]);
 
-  return (
-    <>
-      {display}
-      {typing && (
-        <span
-          aria-hidden
-          className="ml-px inline-block w-px animate-pulse self-center bg-current align-middle"
-          style={{ height: "0.85em" }}
-        />
-      )}
-    </>
+  return fresh ? (
+    <span key={title} className="animate-fade-in">
+      {title}
+    </span>
+  ) : (
+    <>{title}</>
   );
 }

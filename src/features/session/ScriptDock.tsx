@@ -154,7 +154,7 @@ export function ScriptDock({
               onResize: setDockHeight,
             })
           }
-          className="absolute -top-1 left-0 right-0 z-10 h-2 cursor-row-resize bg-transparent transition-colors hover:bg-panel-2"
+          className="absolute -top-1 left-0 right-0 z-10 h-2 cursor-row-resize bg-transparent hover:bg-panel-2"
         />
       )}
       <div

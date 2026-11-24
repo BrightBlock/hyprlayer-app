@@ -8,7 +8,7 @@ import type { RepoSummary } from "./statusBarState";
 export const BAR_PAD_X = 12;
 
 export const BAR_BUTTON = cx(
-  "flex h-6 shrink-0 items-center gap-1.5 rounded-control px-1.5 transition-colors",
+  "flex h-6 shrink-0 items-center gap-1.5 rounded-control px-1.5",
   "focus:outline-none enabled:hover:bg-panel-2 enabled:focus-visible:bg-panel-2",
   "disabled:cursor-not-allowed disabled:opacity-50",
 );

@@ -48,7 +48,7 @@ export function DiffTab({
               type="button"
               disabled={oneSided}
               onClick={() => setMode(m)}
-              className={`px-2 py-0.5 text-ui font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+              className={`px-2 py-0.5 text-ui font-medium disabled:cursor-not-allowed disabled:opacity-40 ${
                 effectiveMode === m ? "bg-panel-2 text-ink" : "text-ink-dim hover:bg-panel-2"
               }`}
             >

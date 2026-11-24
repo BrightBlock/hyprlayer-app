@@ -36,7 +36,7 @@ export type WorkshopChrome = {
   footer: ReactNode;
 };
 
-const BORDERED_ROW = "flex w-full items-center gap-2 rounded-md border text-left transition-colors";
+const BORDERED_ROW = "flex w-full items-center gap-2 rounded-md border text-left";
 const ROW_SELECTED = "border-accent/30 bg-accent/10 text-ink";
 const ROW_IDLE = "border-transparent text-ink hover:bg-edge/40 focus-visible:bg-edge/40";
 
@@ -329,7 +329,7 @@ export function ListCardRow({
       }
       aria-current={selected}
       className={cx(
-        "flex w-full items-start gap-2 rounded-md border px-2.5 py-2 text-left transition-colors",
+        "flex w-full items-start gap-2 rounded-md border px-2.5 py-2 text-left",
         selected ? ROW_SELECTED : ROW_IDLE,
       )}
     >

@@ -92,7 +92,7 @@ function ResultRow({
       onClick={onClick}
       className={rowClass({
         tier: "standard",
-        className: `flex w-full gap-2 rounded-none px-4 text-left text-body transition-colors ${
+        className: `flex w-full gap-2 rounded-none px-4 text-left text-body ${
           active ? "bg-edge/60 text-ink" : "text-ink hover:bg-edge/50"
         }`,
       })}

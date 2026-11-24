@@ -17,7 +17,7 @@ export function ShareCheck({
       aria-checked={checked}
       aria-label={label}
       onClick={onToggle}
-      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${
+      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
         checked ? "border-accent bg-accent text-accent-ink" : "border-edge bg-panel-2 text-transparent"
       }`}
     >

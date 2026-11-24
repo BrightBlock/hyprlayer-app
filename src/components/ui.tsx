@@ -39,7 +39,7 @@ export function cx(...parts: Array<string | false | null | undefined>): string {
 
 // No opacity, snap on disable: WebKit leaves stale paint when an animating button shifts layout.
 const PRESS =
-  "transition-[color,background-color,border-color,box-shadow,scale] hover:duration-(--duration-instant) active:duration-(--duration-instant) motion-safe:enabled:active:scale-97 disabled:transition-none";
+  "transition-[scale] hover:duration-(--duration-instant) active:duration-(--duration-instant) motion-safe:enabled:active:scale-97 disabled:transition-none";
 
 export function ChordHint({ chord, className }: { chord: string; className?: string }) {
   return (
@@ -524,7 +524,7 @@ export function Toggle({
       <span
         aria-hidden="true"
         className={cx(
-          "relative h-[18px] w-[34px] shrink-0 rounded-full transition-colors",
+          "relative h-[18px] w-[34px] shrink-0 rounded-full",
           "peer-focus-visible:ring-2 peer-focus-visible:ring-accent/60",
           checked ? "bg-accent" : "bg-track",
         )}
@@ -579,7 +579,7 @@ export function SegmentedControl<T extends string>({
           {...itemProps(i)}
           title={o.title}
           className={cx(
-            "rounded-[2px] text-ui transition-colors",
+            "rounded-[2px] text-ui",
             bordered ? "flex h-5 items-center px-2" : "px-2.5 py-0.5",
             "disabled:cursor-not-allowed disabled:opacity-50",
             o.value === value
@@ -968,7 +968,7 @@ export function IconButton({ active, className, ...rest }: IconButtonProps) {
 // Rail tier (`Root.tsx`'s icon rail): `h-8 w-8 rounded-[10px]`. Selected state
 // is a left `::before` bar, not a background fill — see ADR-0006.
 export const RAIL_ICON_BASE =
-  "relative flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors";
+  "relative flex h-8 w-8 items-center justify-center rounded-[10px]";
 const RAIL_ACTIVE_BAR =
   "before:absolute before:-left-2 before:top-1/2 before:h-8 before:w-[2px] " +
   "before:-translate-y-1/2 before:rounded-r-full before:bg-accent before:content-['']";

@@ -1,21 +1,19 @@
 import { useEffect, useState } from "react";
 
 import { HyprlayerMark } from "@/components/Logo";
-import { formatElapsed } from "@/lib/format";
+import { formatRunningElapsed } from "@/lib/format";
 
 import type { Activity } from "./activityStatus";
 
-// formatElapsed shows tenths under a minute, whole seconds after.
 function Elapsed({ since }: { since: number }) {
   const [now, setNow] = useState(() => Date.now());
-  const fine = now - since < 60_000;
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), fine ? 100 : 1000);
+    const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [fine]);
+  }, []);
   return (
     <span aria-hidden className="shrink-0 tabular-nums">
-      · {formatElapsed(now - since)}
+      · {formatRunningElapsed(now - since)}
     </span>
   );
 }

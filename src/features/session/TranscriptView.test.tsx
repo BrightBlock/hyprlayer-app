@@ -175,15 +175,15 @@ describe("re-pinning on resize", () => {
     expect(el.scrollTop).toBe(200);
   });
 
-  it("does not start a second animation loop while a turn is busy", () => {
+  it("pins a busy turn from resizes alone, with no frame loop", () => {
     const { el, shrinkViewportTo } = renderStuck(true);
-    expect(frames).toHaveLength(1);
+    expect(frames).toHaveLength(0);
 
     shrinkViewportTo(300);
     resize();
 
     expect(el.scrollTop).toBe(700);
-    expect(frames).toHaveLength(1);
+    expect(frames).toHaveLength(0);
   });
 });
 

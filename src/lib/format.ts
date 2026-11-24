@@ -1,4 +1,10 @@
 
+/** A running clock: whole seconds, so it repaints once a second rather than ten times. */
+export function formatRunningElapsed(ms: number): string {
+  const totalSec = Math.max(0, ms) / 1000;
+  return totalSec < 60 ? `${Math.floor(totalSec)}s` : formatElapsed(ms);
+}
+
 export function formatElapsed(ms: number): string {
   const totalSec = Math.max(0, ms) / 1000;
   if (totalSec < 60) return `${totalSec.toFixed(1)}s`;

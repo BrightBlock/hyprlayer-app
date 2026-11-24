@@ -89,7 +89,7 @@ export function PipelineBoard({
                       <button
                         type="button"
                         onClick={onOpenArchived}
-                        className="block w-full rounded-card border border-edge bg-panel px-3 py-[11px] text-left opacity-80 shadow-sm transition-colors hover:border-ink-dim/50"
+                        className="block w-full rounded-card border border-edge bg-panel px-3 py-[11px] text-left opacity-80 shadow-sm hover:border-ink-dim/50"
                       >
                         <span className="block truncate text-body font-semibold text-ink">{v.item.title}</span>
                         <span className="mt-1 block truncate font-mono text-meta text-ink-4">

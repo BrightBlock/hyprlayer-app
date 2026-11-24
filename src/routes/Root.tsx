@@ -1557,7 +1557,7 @@ export function Root() {
             role="separator"
             aria-orientation="vertical"
             aria-label="Resize project sidebar"
-            className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
+            className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent hover:bg-edge/60"
             onPointerDown={startSidebarResize}
           />
         )}

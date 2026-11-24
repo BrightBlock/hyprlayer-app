@@ -98,7 +98,7 @@ export function ProjectPipeline({
 
   if (views.length === 0) {
     return (
-      <div className="relative flex h-full min-h-0 flex-col bg-surface">
+      <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-surface">
         <div inert={expanded} className="min-h-0 flex-1">
           <NoWorktreeBlank projectPath={projectPath} folder={folder} onNew={onNew} onRestore={openArchivedWorktrees} />
         </div>
@@ -118,7 +118,7 @@ export function ProjectPipeline({
   const branches = views.filter((v) => !isFolderWorkstream(v)).length;
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col bg-surface">
+    <div className="relative flex h-full min-h-0 flex-col overflow-hidden bg-surface">
       <div inert={expanded} className="contents">
         <header className="flex flex-wrap items-center gap-x-3.5 gap-y-2 px-6 pt-[18px] pb-2">
           <div className="flex min-w-0 flex-1 items-center gap-2.5">

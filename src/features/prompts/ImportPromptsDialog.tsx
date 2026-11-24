@@ -143,7 +143,7 @@ export function ImportPromptsDialog({
                           key={r.value}
                           type="button"
                           onClick={() => setDecision(c.key, { resolution: r.value })}
-                          className={`rounded px-2 py-0.5 text-ui-sm font-medium transition-colors ${
+                          className={`rounded px-2 py-0.5 text-ui-sm font-medium ${
                             active
                               ? "border border-accent bg-accent text-accent-ink"
                               : "border border-edge bg-panel text-ink-dim hover:text-ink"

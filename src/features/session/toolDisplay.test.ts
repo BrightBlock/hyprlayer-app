@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatElapsed, formatRelativeTime } from "@/lib/format";
+import { formatElapsed, formatRelativeTime, formatRunningElapsed } from "@/lib/format";
 import type { TranscriptItem } from "./transcript";
 import {
   baseName,
@@ -569,6 +569,14 @@ describe("docTitle", () => {
       "libhyprlayer crate extraction",
     );
     expect(docTitle("/t/plans/big_refactor.md")).toBe("big refactor");
+  });
+});
+
+describe("formatRunningElapsed", () => {
+  it("shows whole seconds under a minute, then formatElapsed", () => {
+    expect(formatRunningElapsed(0)).toBe("0s");
+    expect(formatRunningElapsed(19_900)).toBe("19s");
+    expect(formatRunningElapsed(83_000)).toBe("1m 23s");
   });
 });
 

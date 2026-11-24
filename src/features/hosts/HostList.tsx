@@ -46,7 +46,7 @@ const ROW_BUTTON =
 // Every control is in flow, so the row needs no reserved gutter; the header
 // shares this inset, and `ROW_BUTTON`, so its `+` lands in the kebab's column.
 const ROW_INSET_RIGHT = "pr-1.5";
-const ROW_BASE = `flex items-center gap-2 rounded-md border pl-2.5 ${ROW_INSET_RIGHT} py-1 transition-colors`;
+const ROW_BASE = `flex items-center gap-2 rounded-md border pl-2.5 ${ROW_INSET_RIGHT} py-1`;
 const ROW_SELECTED = "border-accent/30 bg-accent/10 text-ink";
 const ROW_IDLE = "border-transparent text-ink hover:bg-edge/40";
 

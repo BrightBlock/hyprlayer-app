@@ -618,18 +618,31 @@ a {
 /* Duration matches FLASH_MS in features/plan/usePlan.ts. */
 @keyframes plan-flash {
   from {
-    background-color: var(--color-panel-2);
+    opacity: 1;
   }
   to {
-    background-color: transparent;
+    opacity: 0;
   }
 }
+/* The flash fades a tinted layer: an animated background-color repaints every frame. */
 .animate-plan-flash {
+  position: relative;
+  isolation: isolate;
+}
+.animate-plan-flash::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background-color: var(--color-panel-2);
+  opacity: 0;
+  pointer-events: none;
   animation: plan-flash 1s ease-out;
 }
 @media (prefers-reduced-motion: reduce) {
   .animate-plan-pulse,
-  .animate-plan-flash {
+  .animate-plan-flash::before {
     animation: none;
   }
 }
@@ -644,23 +657,26 @@ a {
   }
 }
 .hl-layer {
-  animation: hl-layer-pulse 1.5s ease-in-out infinite;
+  animation: hl-layer-pulse 1.5s ease-in-out infinite both;
 }
 .hl-layer:nth-child(2) {
-
-  animation-delay: 0s;
-}
-.hl-layer:nth-child(3) {
   animation-delay: 0.16s;
 }
-.hl-layer:nth-child(4) {
-
+.hl-layer:nth-child(3) {
   animation-delay: 0.32s;
 }
 @media (prefers-reduced-motion: reduce) {
   .hl-layer {
     animation: none;
     opacity: var(--hl-base);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-spin,
+  .animate-pulse,
+  .animate-ping {
+    animation: none;
   }
 }
 

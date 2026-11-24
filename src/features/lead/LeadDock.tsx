@@ -174,19 +174,21 @@ export function LeadDock({
   };
 
   const atDockHeight = phase === "closed" || (phase === "growing" && !primed) || (phase === "shrinking" && primed);
-  const heightCurve =
+  const slideCurve =
     reduce || phase === "open" || phase === "fading"
       ? "none"
       : phase === "shrinking"
-        ? `height calc(var(--duration-gentle) * ${SHRINK_SHARE}) var(--ease-in)`
-        : "height var(--duration-gentle) var(--ease-std)";
+        ? `transform calc(var(--duration-gentle) * ${SHRINK_SHARE}) var(--ease-in)`
+        : "transform var(--duration-gentle) var(--ease-std)";
+  // The panel keeps its full height and slides; animating its height relaid out the page every frame.
   const panelStyle: CSSProperties = {
-    height: phase === "open" || phase === "fading" ? "100%" : `${atDockHeight ? heights.docked : heights.full}px`,
-    transition: heightCurve,
+    height: phase === "open" || phase === "fading" ? "100%" : `${heights.full}px`,
+    transform: atDockHeight ? `translateY(${heights.full - heights.docked}px)` : "none",
+    transition: slideCurve,
   };
   const chevronStyle: CSSProperties = {
     transform: atDockHeight ? "rotate(180deg)" : "none",
-    transition: heightCurve === "none" ? "none" : heightCurve.replace("height", "transform"),
+    transition: slideCurve,
   };
   const contentShown = phase === "open";
   const contentStyle: CSSProperties = reduce

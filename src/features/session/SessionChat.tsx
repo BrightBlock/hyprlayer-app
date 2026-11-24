@@ -85,7 +85,7 @@ import { detectHandoffDoc, type ToolNaming } from "./toolDisplay";
 import { ActivityBar } from "./ActivityBar";
 import { activityStatus } from "./activityStatus";
 import { useWrittenDocs } from "./writtenDocs";
-import { planRevisions } from "./planRevisions";
+import { planRevisions, sameRevisions } from "./planRevisions";
 import { PlanCardsContext } from "./planCardSlot";
 import { interceptSend } from "./sendInterceptor";
 import { goalActiveSince, useSessionGoal } from "./sessionGoal";
@@ -762,10 +762,19 @@ export function SessionChat({
 
   const sid = shell.sessionId;
   // A tab letting go of its session stops watching it, as closing the tab does.
+  // ProjectPage hands down fresh callbacks on every keystroke; reading them through refs keeps the
+  // memoized transcript from re-rendering with the draft.
+  const resetSessionRef = useRef(onResetSession);
+  resetSessionRef.current = onResetSession;
+  const draftChangeRef = useRef(onDraftChange);
+  draftChangeRef.current = onDraftChange;
   const resetSession = useCallback(() => {
-    onResetSession();
+    resetSessionRef.current();
     if (sid) dropSession(sid);
-  }, [onResetSession, sid]);
+  }, [sid]);
+  const loadOlder = useCallback(() => {
+    if (sid) loadOlderTurns(sid);
+  }, [sid]);
   const olderTurns = session?.olderTurns;
   const sync = useTranscriptSync((s) => (sid ? s.bySession[sid] : undefined));
   const divider = useTranscriptSync((s) => (sid ? (s.divider[sid] ?? null) : null));
@@ -897,13 +906,26 @@ export function SessionChat({
   const writtenDocs = useWrittenDocs(workstreamId);
   const sessionStage = session?.stage;
   // An implement session only ticks the plan's checkboxes; those edits are not revisions.
-  const planCards = useMemo(
+  const nextPlanCards = useMemo(
     () =>
       sid && sessionItems && sessionStage !== "implement"
         ? { sessionId: sid, workstreamId, revisions: planRevisions(sessionItems, writtenDocs) }
         : null,
     [sid, workstreamId, sessionItems, sessionStage, writtenDocs],
   );
+  // Every message and tool row reads this context: a fresh object per streamed event re-rendered the transcript.
+  const planCardsRef = useRef(nextPlanCards);
+  const prevPlanCards = planCardsRef.current;
+  if (
+    !prevPlanCards ||
+    !nextPlanCards ||
+    prevPlanCards.sessionId !== nextPlanCards.sessionId ||
+    prevPlanCards.workstreamId !== nextPlanCards.workstreamId ||
+    !sameRevisions(prevPlanCards.revisions, nextPlanCards.revisions)
+  ) {
+    planCardsRef.current = nextPlanCards;
+  }
+  const planCards = planCardsRef.current;
   const { goal: sessionGoal, detail: goalDetail } = useSessionGoal(sid, workstreamId);
   const goalIterations = goalDetail?.iterations ?? null;
   const sessionHarness = session?.harness;
@@ -1297,7 +1319,7 @@ export function SessionChat({
           useToast.getState().show(refused.title, refused.body, { tone: "warn" });
           return;
         }
-        onDraftChange(text);
+        draftChangeRef.current(text);
         if (isFirstUserTurn(sid, itemId)) {
           resetSession();
         } else {
@@ -1312,7 +1334,7 @@ export function SessionChat({
         onRetry: () => void retryAuth(),
       },
     }),
-    [sid, olderTurns, onDraftChange, resetSession, authOpenId, harness.label, harness.key, retryingAuth, retryAuth],
+    [sid, olderTurns, resetSession, authOpenId, harness.label, harness.key, retryingAuth, retryAuth],
   );
 
   usePublishSessionControls(
@@ -1406,7 +1428,7 @@ export function SessionChat({
               ref={transcriptRef}
               items={session?.items ?? []}
               olderTurns={olderTurns}
-              onLoadOlder={sid ? () => loadOlderTurns(sid) : undefined}
+              onLoadOlder={sid ? loadOlder : undefined}
               busy={working}
               permission={permission}
               prompt={prompt}
@@ -1531,7 +1553,7 @@ export function SessionChat({
               )}
               <ActivityBar activity={activity} />
               <div
-                className={`relative rounded-lg border bg-panel-2 transition-colors ${
+                className={`relative rounded-lg border bg-panel-2 ${
                   sync?.phase === "guard"
                     ? "border-warn/50 focus-within:border-warn/50"
                     : behind

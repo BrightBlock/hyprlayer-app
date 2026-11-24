@@ -142,7 +142,7 @@ export function AppearanceSettings() {
                 type="button"
                 onClick={() => setMode(theme.id)}
                 aria-pressed={active}
-                className={`flex items-center gap-3 rounded-md border px-3 py-2 text-left text-body transition-colors ${
+                className={`flex items-center gap-3 rounded-md border px-3 py-2 text-left text-body ${
                   active
                     ? "border-accent bg-panel-2 text-ink"
                     : "border-edge text-ink-dim hover:bg-edge/60 hover:text-ink"

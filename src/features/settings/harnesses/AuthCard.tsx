@@ -16,7 +16,7 @@ export function AuthCard({
       type="button"
       onClick={onSelect}
       aria-pressed={selected}
-      className={`relative rounded-lg border p-4 text-left transition-colors ${
+      className={`relative rounded-lg border p-4 text-left ${
         selected ? "border-accent bg-panel-2" : "border-edge hover:bg-edge/40"
       }`}
     >

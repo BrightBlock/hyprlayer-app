@@ -217,7 +217,7 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
                 onClick={() => select(row)}
                 className={rowClass({
                   tier: "standard",
-                  className: `flex w-full gap-2 rounded-none px-4 text-left text-body transition-colors ${
+                  className: `flex w-full gap-2 rounded-none px-4 text-left text-body ${
                     clampedActive === i ? "bg-edge/60 text-ink" : "text-ink hover:bg-edge/50"
                   } ${row.disabled ? "opacity-50" : ""}`,
                 })}

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { TranscriptItem } from "./transcript";
 
-import { planRevisions } from "./planRevisions";
+import { planRevisions, sameRevisions } from "./planRevisions";
 
 const PLAN = "/t/repos/app/shared/plans/2026-09-24-og.md";
 const OTHER = "/t/repos/app/shared/plans/2026-09-24-other.md";
@@ -110,5 +110,20 @@ describe("planRevisions", () => {
       ["c1", "inline", false, false],
       ["t1", PLAN, false, true],
     ]);
+  });
+});
+
+describe("sameRevisions", () => {
+  const rev = (planKey: string, latest = false) => ({ planKey, text: null, superseded: false, latest });
+
+  it("matches equal revisions in fresh maps", () => {
+    expect(sameRevisions(new Map([["t1", rev(PLAN, true)]]), new Map([["t1", rev(PLAN, true)]]))).toBe(true);
+  });
+
+  it("tells a changed or added revision apart", () => {
+    const a = new Map([["t1", rev(PLAN, true)]]);
+    expect(sameRevisions(a, new Map([["t1", rev(PLAN, false)]]))).toBe(false);
+    expect(sameRevisions(a, new Map([["t1", rev(PLAN, true)], ["t2", rev(OTHER)]]))).toBe(false);
+    expect(sameRevisions(a, new Map([["t2", rev(PLAN, true)]]))).toBe(false);
   });
 });

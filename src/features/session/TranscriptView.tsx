@@ -107,7 +107,7 @@ function UserMessageToolbar({
   const now = useTickingNow(createdAt);
   const rel = createdAt === null ? "" : formatRelativeTime(createdAt, now);
   const btn =
-    "flex h-6 w-6 cursor-pointer items-center justify-center rounded text-ink-dim opacity-0 transition hover:bg-edge/60 hover:text-ink group-hover:opacity-100";
+    "flex h-6 w-6 cursor-pointer items-center justify-center rounded text-ink-dim opacity-0 transition-opacity hover:bg-edge/60 hover:text-ink group-hover:opacity-100";
   return (
     <div className="mt-1 flex items-center justify-end gap-1 text-ui-sm text-ink-dim">
       <button
@@ -239,34 +239,6 @@ function QueuedUserMessage({ message, onCancel }: { message: QueuedMessage; onCa
   );
 }
 
-function useSmoothText(text: string, streaming: boolean): string {
-  const [revealed, setRevealed] = useState(() => (streaming ? 0 : text.length));
-  const targetLen = useRef(text.length);
-  targetLen.current = text.length;
-
-  useEffect(() => {
-    if (!streaming) {
-      setRevealed(targetLen.current);
-      return;
-    }
-    let last = 0;
-    let frame = requestAnimationFrame(function tick(ts) {
-      if (ts - last >= 33) {
-        last = ts;
-        setRevealed((cur) => {
-          const target = targetLen.current;
-          if (cur >= target) return cur;
-          return Math.min(target, cur + Math.max(2, Math.ceil((target - cur) / 6)));
-        });
-      }
-      frame = requestAnimationFrame(tick);
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [streaming]);
-
-  return text.slice(0, Math.min(revealed, text.length));
-}
-
 const StreamCursor = () => (
   <span className="ml-0.5 inline-block h-3.5 w-1.5 translate-y-0.5 animate-pulse rounded-sm bg-ink-dim align-baseline" />
 );
@@ -278,13 +250,11 @@ const AssistantMessage = memo(function AssistantMessage({
   text: string;
   streaming: boolean;
 }) {
-  const shown = useSmoothText(text, streaming);
-
   if (streaming) {
     return (
       <div className="selectable">
-        {shown ? (
-          <MarkdownPreview body={shown} />
+        {text ? (
+          <MarkdownPreview body={text} />
         ) : (
           <span className="text-body leading-prose text-ink-dim">…</span>
         )}
@@ -378,6 +348,14 @@ const ToolNames = createContext<ToolNaming | undefined>(undefined);
 
 function useToolName(name: string): string {
   return toolDisplayName(name, useContext(ToolNames));
+}
+
+// Every tool block reads this set, so a new one per streamed event re-rendered the whole transcript.
+function useSameSet(ids: readonly string[]): ReadonlySet<string> {
+  const ref = useRef<ReadonlySet<string>>(new Set());
+  const prev = ref.current;
+  if (ids.length !== prev.size || ids.some((id) => !prev.has(id))) ref.current = new Set(ids);
+  return ref.current;
 }
 
 function useBackgroundRunning(toolUseId: string): boolean {
@@ -669,7 +647,7 @@ const CompactDivider = memo(function CompactDivider({
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
-            className="flex shrink-0 items-center gap-1 rounded px-1 py-0.5 transition hover:bg-panel-2 hover:text-ink"
+            className="flex shrink-0 items-center gap-1 rounded px-1 py-0.5 hover:bg-panel-2 hover:text-ink"
             title="claude summarized the prior turns; expand to read the summary."
           >
             <span>
@@ -770,7 +748,7 @@ const GoalIterationDivider = memo(function GoalIterationDivider({
           type="button"
           onClick={() => setOpen((v) => !v)}
           aria-expanded={open}
-          className="shrink-0 rounded px-1 py-0.5 transition hover:bg-panel-2 hover:text-ink focus-visible:bg-panel-2 focus-visible:text-ink"
+          className="shrink-0 rounded px-1 py-0.5 hover:bg-panel-2 hover:text-ink focus-visible:bg-panel-2 focus-visible:text-ink"
         >
           {open ? "Hide prompt" : "Show prompt"}
         </button>
@@ -1084,6 +1062,16 @@ function toUnits(items: TranscriptItem[], keepOut: (it: TranscriptItem) => boole
   return units;
 }
 
+// Folding reruns over the whole transcript on every streamed event; unchanged items keep their kind.
+const exploreKinds = new WeakMap<TranscriptItem, { naming?: ToolNaming; kind: ExploreKind | null }>();
+function cachedExploreKind(item: Extract<TranscriptItem, { kind: "tool" }>, naming?: ToolNaming): ExploreKind | null {
+  const hit = exploreKinds.get(item);
+  if (hit && hit.naming === naming) return hit.kind;
+  const kind = exploreKind(item.name, item.input, naming);
+  exploreKinds.set(item, { naming, kind });
+  return kind;
+}
+
 // Claude Code's collapsed read/search runs: thinking between the calls folds in, trailing thinking stays out.
 function toExploredUnits(
   items: TranscriptItem[],
@@ -1104,7 +1092,7 @@ function toExploredUnits(
     kinds = [];
   };
   for (const item of items) {
-    const kind = item.kind === "tool" && !keepOut(item) ? exploreKind(item.name, item.input, naming) : null;
+    const kind = item.kind === "tool" && !keepOut(item) ? cachedExploreKind(item, naming) : null;
     if (kind) {
       run.push(item);
       kinds.push(kind);
@@ -1119,15 +1107,19 @@ function toExploredUnits(
   return units;
 }
 
-function ToolGroup({
-  items,
-  busy,
-  explored,
-}: {
-  items: TranscriptItem[];
-  busy: boolean;
-  explored?: ExploreKind[];
-}) {
+type ToolGroupProps = { items: TranscriptItem[]; busy: boolean; explored?: ExploreKind[] };
+
+const sameList = <T,>(a: readonly T[] | undefined, b: readonly T[] | undefined) =>
+  a === b || (!!a && !!b && a.length === b.length && a.every((x, i) => x === b[i]));
+
+// Each fold builds new arrays, so the default comparison would re-render every group per event.
+const ToolGroup = memo(
+  ToolGroupView,
+  (a: ToolGroupProps, b: ToolGroupProps) =>
+    a.busy === b.busy && sameList(a.items, b.items) && sameList(a.explored, b.explored),
+);
+
+function ToolGroupView({ items, busy, explored }: ToolGroupProps) {
   const [open, setOpen] = useState(false);
   const openBg = useContext(OpenBackgroundIds);
   const jump = useContext(JumpTargetId);
@@ -1784,15 +1776,6 @@ export const TranscriptView = memo(
     }, [items, busy]);
 
     useEffect(() => {
-      if (!busy) return;
-      let frame = requestAnimationFrame(function tick() {
-        pin();
-        frame = requestAnimationFrame(tick);
-      });
-      return () => cancelAnimationFrame(frame);
-    }, [busy, pin]);
-
-    useEffect(() => {
       const el = scrollRef.current;
       const content = contentRef.current;
       if (!el || !content || typeof ResizeObserver === "undefined") return;
@@ -1809,9 +1792,8 @@ export const TranscriptView = memo(
       [],
     );
 
-    const openBackgroundIds = useMemo(
-      () => new Set(backgroundTasksFromItems(items).map((t) => t.toolUseId)),
-      [items],
+    const openBackgroundIds = useSameSet(
+      useMemo(() => backgroundTasksFromItems(items).map((t) => t.toolUseId), [items]),
     );
     const readyAnchor = useMemo(
       () => (ready ? reviewAnchor(items, turnOpen, ready.worktreePath) : null),

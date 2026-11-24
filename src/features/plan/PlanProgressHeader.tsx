@@ -161,8 +161,8 @@ export function PlanProgressHeader({
         <div
           className="h-full rounded-[3px] bg-ink"
           style={{
-            width: `${tracker.progress * 100}%`,
-            transition: reduceMotion ? undefined : "width 200ms ease",
+            transform: `translateX(${(tracker.progress - 1) * 100}%)`,
+            transition: reduceMotion ? undefined : "transform 200ms ease",
           }}
         />
       </div>

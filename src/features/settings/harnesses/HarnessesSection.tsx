@@ -61,7 +61,7 @@ export function HarnessesSection({
               type="button"
               onClick={() => setActive(tab.id)}
               aria-current={isActive}
-              className={`-mb-px flex items-center gap-1.5 border-b-2 px-0.5 pb-2.5 text-body transition-colors ${
+              className={`-mb-px flex items-center gap-1.5 border-b-2 px-0.5 pb-2.5 text-body ${
                 isActive
                   ? "border-accent text-ink"
                   : "border-transparent text-ink-dim hover:text-ink"

@@ -113,7 +113,7 @@ export function RepoSourcePicker({
               type="button"
               onClick={() => setMode(m)}
               disabled={disabled}
-              className={`flex-1 rounded-md border px-3 py-2 font-medium transition-colors ${
+              className={`flex-1 rounded-md border px-3 py-2 font-medium ${
                 value.mode === m
                   ? "border-edge bg-panel-2 text-ink"
                   : "border-transparent text-ink-dim hover:text-ink"
@@ -230,7 +230,7 @@ function RecentRepos({
               key={repo.nameWithOwner}
               type="button"
               onClick={() => onPick(repo)}
-              className={`flex w-full items-center gap-3 px-3 py-2 text-left transition-colors ${
+              className={`flex w-full items-center gap-3 px-3 py-2 text-left ${
                 selectedUrl.trim() === repo.url ? "bg-panel-2" : "hover:bg-panel-2/60"
               }`}
             >

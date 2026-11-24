@@ -290,8 +290,8 @@ export function KnowledgeGraph({ graph: full }: Props) {
                   fill="none"
                   stroke={stroke}
                   strokeWidth={(edge.kind === "ref" ? 1.1 : 0.75) / scale}
-                  strokeOpacity={!active ? base : litEdge ? 0.95 : 0.06}
-                  style={{ transition: "stroke-opacity 160ms ease" }}
+                  opacity={!active ? base : litEdge ? 0.95 : 0.06}
+                  style={{ transition: "opacity 160ms ease" }}
                 />
               );
             })}
