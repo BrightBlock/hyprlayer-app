@@ -24,7 +24,6 @@ const BEFORE_ENTER: Duration = Duration::from_millis(400);
 const PICKER_OPEN: Duration = Duration::from_secs(3);
 /// A TUI busy running a statusLine reads its input late; the Enter waits for the echo.
 const ECHO_WAIT: Duration = Duration::from_secs(2);
-const KEY_SETTLE: Duration = Duration::from_millis(400);
 /// How long a read waits for a screen it knows, or a key for what it moved: a loaded machine
 /// paints late, and a read mid-repaint sees no picker at all.
 const SCREEN_WAIT: Duration = Duration::from_secs(5);
@@ -268,7 +267,7 @@ impl PtyControlService<'_> {
         drive
             .until(SCREEN_WAIT, |rows| ready(rows) || covered(rows))
             .await?;
-        if !drive.settled(ready).await? {
+        if drive.settled_some(|rows| painted(rows, ready)).await? != Some(true) {
             return Err(failed("the agent is showing a prompt"));
         }
         // `command` types onto the input line, so a person's draft would be sent or wiped.
@@ -309,29 +308,19 @@ impl Drive {
         Ok(())
     }
 
-    /// `bytes` only while `on` holds for the screen and the agent isn't asking: a prompt can open
-    /// between any two keys.
-    fn key_when(&self, on: impl Fn(&[String]) -> bool, bytes: &[u8]) -> Result<()> {
-        if self.asking() {
-            return Err(failed(
-                "the agent started asking you something, so the change stopped",
-            ));
-        }
-        if !on(&self.rows()?) {
-            return Err(failed(
-                "claude's screen changed under the change, so it stopped",
-            ));
-        }
+    /// `bytes` once `on` holds for the screen, within `SCREEN_WAIT`, while the agent isn't asking: a
+    /// prompt can open between any two keys.
+    async fn key_soon(&self, on: impl Fn(&[String]) -> bool, bytes: &[u8]) -> Result<()> {
+        when_shown(|| self.read_unless_asking(), on).await?;
         self.key(bytes)
     }
 
-    /// `key_when` once `on` holds, within `SCREEN_WAIT`: a TUI repainting between keys reads blank for a moment.
-    async fn key_soon(&self, on: impl Fn(&[String]) -> bool, bytes: &[u8]) -> Result<()> {
-        let deadline = Instant::now() + SCREEN_WAIT;
-        while !self.asking() && !on(&self.rows()?) && Instant::now() < deadline {
-            tokio::time::sleep(POLL).await;
+    /// The screen, or `None` while the agent asks.
+    fn read_unless_asking(&self) -> Result<Option<Vec<String>>> {
+        if self.asking() {
+            return Ok(None);
         }
-        self.key_when(on, bytes)
+        self.rows().map(Some)
     }
 
     fn asking(&self) -> bool {
@@ -373,20 +362,6 @@ impl Drive {
                 return false;
             }
             tokio::time::sleep(POLL).await;
-        }
-    }
-
-    /// `read` once two polls agree: claude repaints a row over more than one write.
-    async fn settled<T: PartialEq>(&self, read: impl Fn(&[String]) -> T) -> Result<T> {
-        let deadline = Instant::now() + KEY_SETTLE;
-        let mut last = read(&self.rows()?);
-        loop {
-            tokio::time::sleep(POLL).await;
-            let now = read(&self.rows()?);
-            if now == last || Instant::now() >= deadline {
-                return Ok(now);
-            }
-            last = now;
         }
     }
 
@@ -446,9 +421,10 @@ impl Drive {
         }
         tokio::time::sleep(BEFORE_ENTER).await;
         let shows = |rows: &[String]| shows_line(rows, command);
-        let typed = self.until(ECHO_WAIT, shows).await? && self.settled(shows).await?;
+        let typed = self.until(ECHO_WAIT, shows).await?
+            && self.settled_some(|rows| painted(rows, shows)).await? == Some(true);
         if typed {
-            return self.key_when(shows, ENTER);
+            return self.key_soon(shows, ENTER).await;
         }
         Err(failed(if self.erase(command).await {
             format!("the agent's input didn't take {command}, so nothing was sent")
@@ -542,7 +518,8 @@ impl Drive {
                 return Ok(true);
             }
             if !answered && switch_dialog_for(&rows, label) {
-                self.key_when(|rows| switch_dialog_for(rows, label), ENTER)?;
+                self.key_soon(|rows| switch_dialog_for(rows, label), ENTER)
+                    .await?;
                 answered = true;
                 deadline = deadline.max(Instant::now() + DIALOG_CONFIRM);
             }
@@ -624,6 +601,31 @@ impl Drive {
                 self.terminal_id
             );
         }
+    }
+}
+
+/// Polls `read` until `on` holds, within `SCREEN_WAIT`; `read` gives `None` while the agent asks.
+/// The key goes on the read that passed: a second could land mid-repaint and see no screen at all.
+async fn when_shown(
+    mut read: impl FnMut() -> Result<Option<Vec<String>>>,
+    on: impl Fn(&[String]) -> bool,
+) -> Result<()> {
+    let deadline = Instant::now() + SCREEN_WAIT;
+    loop {
+        let Some(rows) = read()? else {
+            return Err(failed(
+                "the agent started asking you something, so the change stopped",
+            ));
+        };
+        if on(&rows) {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(failed(
+                "claude's screen never showed what the change waits for, so it stopped",
+            ));
+        }
+        tokio::time::sleep(POLL).await;
     }
 }
 
@@ -792,6 +794,11 @@ pub(super) fn paste_refusal(screen: &Screen) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+/// `check` for the input box or a prompt over it; `None` for a screen mid-repaint, which shows neither.
+fn painted(rows: &[String], check: impl Fn(&[String]) -> bool) -> Option<bool> {
+    (ready(rows) || covered(rows)).then(|| check(rows))
 }
 
 pub(super) fn covered(rows: &[String]) -> bool {
@@ -993,6 +1000,39 @@ mod tests {
 
     fn report(failures: Vec<String>) {
         assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    }
+
+    /// The input box as a TUI paints it, and the same screen cleared for its next repaint.
+    fn input_box() -> Vec<String> {
+        let rule = "─".repeat(40);
+        vec![rule.clone(), "❯\u{a0}".into(), rule]
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_repaint_after_the_read_that_passed_doesnt_stop_the_key() {
+        let mut reads = vec![input_box(), vec![String::new(); 3]].into_iter();
+        let outcome = when_shown(|| Ok(Some(reads.next().unwrap_or_default())), ready).await;
+        assert!(outcome.is_ok(), "{outcome:?}");
+    }
+
+    #[test]
+    fn a_screen_mid_repaint_reads_as_neither_ready_nor_a_prompt() {
+        assert_eq!(painted(&vec![String::new(); 3], ready), None);
+        assert_eq!(painted(&input_box(), ready), Some(true));
+        let prompt = vec![" Do you want to proceed?".into(), " Esc to cancel".into()];
+        assert_eq!(painted(&prompt, ready), Some(false));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_screen_that_never_shows_stops_the_key() {
+        let outcome = when_shown(|| Ok(Some(vec![String::new(); 3])), ready).await;
+        assert!(outcome.is_err());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_agent_that_asks_stops_the_key() {
+        let outcome = when_shown(|| Ok(None), ready).await;
+        assert!(outcome.is_err());
     }
 
     #[test]
