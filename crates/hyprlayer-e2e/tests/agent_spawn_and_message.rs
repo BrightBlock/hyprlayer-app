@@ -1198,7 +1198,7 @@ async fn agent_spawn_and_message() {
     j.call(
         &c,
         Request::WatchWorktree {
-            workstream_id: Some(ws),
+            workstream_id: Some(ws.clone()),
         },
     )
     .await
@@ -1263,6 +1263,64 @@ async fn agent_spawn_and_message() {
         json!({ "delivered": delivered, "pending": pending, "notifies": notes }),
     );
     drop(waker_mcp);
+
+    j.step("a goal on an exited child takes a live slot, as reviving it with a message does");
+    let limited = start_session(&mut j, &c, &ws, "Limited", "$LIMITED").await;
+    let mut limited_mcp = driver(&mut j, &sandbox, &limited, "$LIMITED_TOKEN").await;
+    let max_before = c
+        .get_app_settings()
+        .await
+        .expect("settings")
+        .agent_control
+        .max_live_children;
+    update_settings(&mut j, &c, |s| s.agent_control.max_live_children = 1).await;
+    let first = text(
+        &parsed(
+            &limited_mcp
+                .call("spawn_agent", json!({ "prompt": "E2E_A", "title": "A" }))
+                .await,
+        ),
+        "/sessionId",
+    );
+    j.alias(&first, "$LIMITED_A");
+    wait_idle(&mut limited_mcp, &first).await;
+    limited_mcp
+        .call("kill_agent", json!({ "session_id": first }))
+        .await;
+    let first_gone = gone(&c, &first).await;
+    let second = text(
+        &parsed(
+            &limited_mcp
+                .call("spawn_agent", json!({ "prompt": "E2E_B", "title": "B" }))
+                .await,
+        ),
+        "/sessionId",
+    );
+    j.alias(&second, "$LIMITED_B");
+    wait_idle(&mut limited_mcp, &second).await;
+    let revived = limited_mcp
+        .call(
+            "start_goal",
+            json!({
+                "condition": "E2E_AGENT_GOAL",
+                "work_prompt": "Raise the counter.",
+                "checks": [{ "kind": "evaluator" }],
+                "limits": { "maxIterations": 1, "maxCostUsd": 5.0, "maxActiveSecs": 600 },
+                "session_id": first,
+            }),
+        )
+        .await;
+    let refused = refusal(&revived);
+    let first_live = live(&c, &first).await;
+    update_settings(&mut j, &c, |s| {
+        s.agent_control.max_live_children = max_before
+    })
+    .await;
+    j.guard(
+        "at Max live children 1, a goal on the exited child is refused while its sibling runs",
+        first_gone && refused.starts_with("agent_limit_reached") && !first_live,
+        json!({ "firstGone": first_gone, "refusal": refused.starts_with("agent_limit_reached"), "firstLive": first_live }),
+    );
 
     j.step("shutdown");
     let stopped = server.shutdown(&c).await;

@@ -662,6 +662,20 @@
       "guards": [
         {
           "evidence": {
+            "firstGone": true,
+            "firstLive": false,
+            "refusal": true
+          },
+          "guard": "at Max live children 1, a goal on the exited child is refused while its sibling runs",
+          "ok": true
+        }
+      ],
+      "step": "a goal on an exited child takes a live slot, as reviving it with a message does"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "exit": 0,
             "listening": false
           },

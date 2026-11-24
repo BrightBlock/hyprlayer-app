@@ -201,6 +201,34 @@ impl AgentControlService<'_> {
         Ok(slot)
     }
 
+    /// Reviving an exited spawned session takes a live slot from whoever spawned it.
+    async fn admit_revive(
+        &self,
+        identity: &AgentIdentity,
+        target: &Session,
+    ) -> Result<Option<OwnedMutexGuard<()>>> {
+        let parent = self
+            .runtime
+            .agent_links
+            .get(&target.id)
+            .map(|link| link.parent)
+            .or_else(|| {
+                target.spawn_parent().map(|id| AgentCaller::Session {
+                    session_id: id.to_string(),
+                })
+            });
+        Ok(match parent {
+            Some(parent) if parent == identity.caller => {
+                Some(self.admit_child(&parent, "this agent").await?)
+            }
+            Some(parent) => Some(
+                self.admit_child(&parent, "the agent that spawned it")
+                    .await?,
+            ),
+            None => None,
+        })
+    }
+
     async fn is_lead(&self, caller: &AgentCaller) -> bool {
         let AgentCaller::Session { session_id } = caller else {
             return false;
@@ -387,26 +415,7 @@ impl AgentControlService<'_> {
             if workstream.status == WorkstreamStatus::Archived {
                 return Err(denied("that session's workstream is archived"));
             }
-            let parent = self
-                .runtime
-                .agent_links
-                .get(session_id)
-                .map(|link| link.parent)
-                .or_else(|| {
-                    target.spawn_parent().map(|id| AgentCaller::Session {
-                        session_id: id.to_string(),
-                    })
-                });
-            let _slot = match parent {
-                Some(parent) if parent == identity.caller => {
-                    Some(self.admit_child(&parent, "this agent").await?)
-                }
-                Some(parent) => Some(
-                    self.admit_child(&parent, "the agent that spawned it")
-                        .await?,
-                ),
-                None => None,
-            };
+            let _slot = self.admit_revive(identity, &target).await?;
             let op = sessions.op_lock(session_id).await;
             let guard = op.lock().await;
             let session =
@@ -974,6 +983,13 @@ impl AgentControlService<'_> {
             GoalTarget::Session { session_id } => {
                 self.check_session(identity, &session_id).await?;
                 self.check_descendant(identity, &session_id, true).await?;
+                let sessions = self.runtime.sessions();
+                let _slot = match sessions.get(&session_id).await? {
+                    Some(row) if !sessions.is_live(&session_id).await => {
+                        self.admit_revive(identity, &row).await?
+                    }
+                    _ => None,
+                };
                 let target = GoalTarget::Session { session_id };
                 goals.start(StartGoalRequest { target, spec }, author).await
             }
