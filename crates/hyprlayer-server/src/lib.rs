@@ -847,6 +847,17 @@ async fn read_requests<R: AsyncRead + Unpin>(
                     match prepared {
                         Ok((response, source)) => {
                             let stream_id = response.stream_id();
+                            let spawned_terminal = match &response {
+                                streams::StreamResponse::Terminal { terminal_id, .. }
+                                    if matches!(
+                                        command,
+                                        "spawn_cli_terminal" | "spawn_shell_terminal"
+                                    ) =>
+                                {
+                                    Some(terminal_id.clone())
+                                }
+                                _ => None,
+                            };
                             tracing::debug!(
                                 "conn {conn}: {command} opened stream {stream_id:?} in {:?}",
                                 started.elapsed()
@@ -875,6 +886,19 @@ async fn read_requests<R: AsyncRead + Unpin>(
                             if !tx.push_frame_written(bytes).await {
                                 if let Some(stream_id) = stream_id {
                                     streams.remove(stream_id);
+                                }
+                                // Nothing lists a workstream-less terminal, so no one else could close it.
+                                if let Some(terminal_id) = spawned_terminal {
+                                    let close =
+                                        hyprlayer_core::runtime::terminals::CloseTerminalRequest {
+                                            terminal_id,
+                                        };
+                                    if let Err(e) = server.runtime().terminals().close(close).await
+                                    {
+                                        tracing::warn!(
+                                            "conn {conn}: closing an unclaimed {command}: {e}"
+                                        );
+                                    }
                                 }
                                 return;
                             }
