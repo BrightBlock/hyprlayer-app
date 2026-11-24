@@ -1566,6 +1566,49 @@ export type TranscriptHandle = {
 
 const NO_QUEUED: QueuedMessage[] = [];
 
+const TAIL_ITEMS = 120;
+const EARLIER_ITEMS = 120;
+
+/** Where the rendered tail starts: at the first row already shown, else at the newest `TAIL_ITEMS`. */
+export function tailStart(topLevel: readonly TranscriptItem[], firstId: string | null): number {
+  const at = firstId === null ? -1 : topLevel.findIndex((it) => it.id === firstId);
+  return at >= 0 ? at : Math.max(0, topLevel.length - TAIL_ITEMS);
+}
+
+/** The top-level row that holds the first item `match` accepts, through any subagents; -1 when none does. */
+export function topLevelIndexOf(
+  items: readonly TranscriptItem[],
+  topLevel: readonly TranscriptItem[],
+  match: (it: TranscriptItem) => boolean,
+): number {
+  let item = items.find(match);
+  for (let parent = item && parentIdOf(item); item && parent; parent = item && parentIdOf(item)) {
+    const owner = parent;
+    item = items.find((it) => it.kind === "tool" && it.toolUseId === owner);
+  }
+  return item ? topLevel.indexOf(item) : -1;
+}
+
+function EarlierEdge({ rootRef, onReach }: { rootRef: RefObject<HTMLDivElement | null>; onReach: () => void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const reach = useRef(onReach);
+  reach.current = onReach;
+  useEffect(() => {
+    const el = ref.current;
+    const root = rootRef.current;
+    if (!el || !root) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries[entries.length - 1].isIntersecting) reach.current();
+      },
+      { root, rootMargin: "100% 0px 0px 0px" },
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [rootRef]);
+  return <div ref={ref} aria-hidden />;
+}
+
 const RESTICK_PX = 24;
 
 const RELOCK_MS = 200;
@@ -1622,6 +1665,40 @@ export const TranscriptView = memo(
     const scrollRef = useRef<HTMLDivElement>(null);
     const contentRef = useRef<HTMLDivElement>(null);
     const atBottom = useRef(true);
+
+    const childrenByParent: ChildMap = new Map();
+    for (const item of items) {
+      const parent = parentIdOf(item);
+      if (parent) {
+        const arr = childrenByParent.get(parent);
+        if (arr) arr.push(item);
+        else childrenByParent.set(parent, [item]);
+      }
+    }
+    const topLevel = items.filter((item) => parentIdOf(item) === null);
+    // The first row shown stays put, so rows arriving below never shift the ones being read.
+    const [firstId, setFirstId] = useState<string | null>(null);
+    const windowed = typeof IntersectionObserver !== "undefined";
+    const start = windowed ? tailStart(topLevel, firstId) : 0;
+    const pinned = topLevel[start]?.id ?? null;
+    useLayoutEffect(() => {
+      if (pinned !== null && pinned !== firstId) setFirstId(pinned);
+    }, [pinned, firstId]);
+    const reveal = (match: (it: TranscriptItem) => boolean) => {
+      const at = topLevelIndexOf(items, topLevel, match);
+      if (at !== -1 && at < start) setFirstId(topLevel[at].id);
+    };
+    const grownFrom = useRef<number | null>(null);
+    const showEarlier = () => {
+      grownFrom.current = scrollRef.current?.scrollHeight ?? null;
+      setFirstId(topLevel[Math.max(0, start - EARLIER_ITEMS)].id);
+    };
+    useLayoutEffect(() => {
+      const el = scrollRef.current;
+      const before = grownFrom.current;
+      grownFrom.current = null;
+      if (el && before !== null && !atBottom.current) el.scrollTop += el.scrollHeight - before;
+    }, [start]);
     const bottomChanged = useRef(onBottomChange);
     bottomChanged.current = onBottomChange;
     const setAtBottom = useCallback((next: boolean) => {
@@ -1699,6 +1776,7 @@ export const TranscriptView = memo(
 
     useImperativeHandle(ref, () => ({
       scrollToTool(toolUseId) {
+        reveal((it) => it.kind === "tool" && it.toolUseId === toolUseId);
         setJump({
           selector: `[data-tooluse-id="${CSS.escape(toolUseId)}"]`,
           toolUseId,
@@ -1706,6 +1784,7 @@ export const TranscriptView = memo(
         });
       },
       scrollToItem(itemId) {
+        reveal((it) => it.id === itemId);
         setJump({
           selector: `[data-item-id="${CSS.escape(itemId)}"]`,
           toolUseId: null,
@@ -1800,16 +1879,6 @@ export const TranscriptView = memo(
       [items, turnOpen, ready],
     );
 
-    const childrenByParent: ChildMap = new Map();
-    for (const item of items) {
-      const parent = parentIdOf(item);
-      if (parent) {
-        const arr = childrenByParent.get(parent);
-        if (arr) arr.push(item);
-        else childrenByParent.set(parent, [item]);
-      }
-    }
-    const topLevel = items.filter((item) => parentIdOf(item) === null);
     const { tail, divider } = sync;
     const ReadyCard = ready ? readyCardComponent() : null;
     const readyCard = ReadyCard && ready && <ReadyCard sessionId={ready.sessionId} workstreamId={ready.workstreamId} />;
@@ -1837,13 +1906,14 @@ export const TranscriptView = memo(
               )}
             </div>
           )}
+          {start > 0 && <EarlierEdge key={start} rootRef={scrollRef} onReach={showEarlier} />}
           <OpenBackgroundIds.Provider value={openBackgroundIds}>
             <JumpTargetId.Provider value={jump?.toolUseId ?? null}>
               <SelfClientId.Provider value={sync.selfClientId}>
                 <GoalTranscript.Provider value={goal}>
                   <ToolNames.Provider value={toolNaming}>
                     <ItemList
-                      items={topLevel}
+                      items={start > 0 ? topLevel.slice(start) : topLevel}
                       goalChecks
                       childrenByParent={childrenByParent}
                       busy={busy}
