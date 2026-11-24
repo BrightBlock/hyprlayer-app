@@ -41,7 +41,7 @@ export function meterClasses(state: MeterState): { fill: string; text: string } 
 
 export type SyncTone = "ok" | "warn" | "bad";
 
-export type SyncLabel = { text: string; title: string; tone: SyncTone; ticking: boolean };
+type SyncLabel = { text: string; title: string; tone: SyncTone; ticking: boolean };
 
 const connected = (named: string | null, title: string, tone: SyncTone): SyncLabel => ({
   text: named ? `connected · ${named}` : "connected",

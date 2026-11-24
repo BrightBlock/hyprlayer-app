@@ -21,7 +21,7 @@ import { useWorkstreamGitActions } from "@/features/workstreams/useGitActions";
 import { findValidationReport } from "./validationReport";
 import { linkedValidateStep, useValidateStep, useValidateStepStore } from "./validateStep";
 
-export type ValidatePhase =
+type ValidatePhase =
   | "summarizing"
   | "waiting"
   | "unavailable"

@@ -7,7 +7,7 @@ import { useMarkReviewRoundDelivered } from "@/lib/queries";
 import { useToast } from "@/lib/toast";
 import { deliverReview } from "@/features/session/sessionStore";
 
-export type DeliverableRound = { number: number; commentCount: number };
+type DeliverableRound = { number: number; commentCount: number };
 
 // Rounds waiting behind a running turn; Resend must not queue a second copy.
 const queuedRounds = new Set<string>();

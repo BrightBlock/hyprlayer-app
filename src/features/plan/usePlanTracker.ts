@@ -80,7 +80,7 @@ function planWrites(items: SessionEntry["items"], path: string): number {
 }
 
 // A presented plan's state outranks its frontmatter: Claude and codex plans have none.
-export function presentationStatus(p: PlanPresentation | null): string | null {
+function presentationStatus(p: PlanPresentation | null): string | null {
   if (!p) return null;
   if (p.state === "pending") return "awaiting approval";
   if (p.state === "approved") return "approved";

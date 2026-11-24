@@ -4,7 +4,7 @@ import { MarkdownPreview } from "@/features/library/MarkdownPreview";
 import { PhaseSection } from "./PhaseSection";
 import type { PlanTracker } from "./planTracker";
 
-export function PlanChip({ className, children }: { className: string; children: string }) {
+function PlanChip({ className, children }: { className: string; children: string }) {
   return (
     <span className={cx("rounded-control px-[9px] py-[3px] text-ui-sm font-semibold leading-none", className)}>
       {children}

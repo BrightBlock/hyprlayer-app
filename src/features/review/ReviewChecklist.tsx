@@ -38,7 +38,7 @@ export function summarize(review: ReviewView) {
   };
 }
 
-export type ReviewSummary = ReturnType<typeof summarize>;
+type ReviewSummary = ReturnType<typeof summarize>;
 
 export function reviewStatusLabel(review: ReviewView, s: ReviewSummary): string {
   if (review.status === "approved") return "Approved";

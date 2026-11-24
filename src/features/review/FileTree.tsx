@@ -9,7 +9,7 @@ import type { PlanDocPhase } from "@/features/plan/planDoc";
 import { tasksForFile, type Attribution } from "./attribution";
 import type { ReviewGroupBy } from "./reviewStore";
 
-export type TreeGroup = {
+type TreeGroup = {
   key: string;
   kind: "folder" | "task";
   title: string | null;
@@ -88,7 +88,7 @@ const GROUP_BY_OPTIONS: { value: ReviewGroupBy; label: string }[] = [
   { value: "folder", label: "Folder" },
 ];
 
-export function ViewedRing({
+function ViewedRing({
   viewed,
   onToggle,
   className,

@@ -74,7 +74,6 @@ function AfterImplement({
   if (!tracker || !(flow.built || reviewing) || !review?.files.files.length || review.status === "approved") {
     return null;
   }
-  // The met goal's card offers this step itself.
   if (goalOwnsNextStep(goal, flow.step ?? null)) return null;
   if (flow.phase === "choosing") {
     return (

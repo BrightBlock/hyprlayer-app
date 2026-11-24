@@ -7,7 +7,7 @@ import { type CommentLayer, slotKey } from "./commentGutter";
 
 export type Slot = { side: ReviewSide; line: number; content: ReactNode };
 
-export type ComposerAt = { side: ReviewSide; line: number };
+type ComposerAt = { side: ReviewSide; line: number };
 
 const SIDES: readonly ReviewSide[] = ["original", "modified"];
 

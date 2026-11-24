@@ -24,13 +24,13 @@ export const STILL_WRITING = "Still writing…";
 export const WAITING_FOR_PLAN = "Waiting for the agent to present the plan";
 const APPROVAL_TEXT = "Approved. Build it.";
 
-export type ApprovalAction =
+type ApprovalAction =
   | { kind: "thoughts" }
   | { kind: "permission"; requestId: string }
   | { kind: "message" }
   | { kind: "question" };
 
-export type ApprovalContext = {
+type ApprovalContext = {
   key: string;
   // A thoughts doc; plans outside the index (~/.claude/plans, inline text) are never written to.
   indexed: boolean;

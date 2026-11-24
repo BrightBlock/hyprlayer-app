@@ -12,8 +12,8 @@ import {
 
 import type { ReviewSide } from "@/lib/bindings";
 
-export const setThreads = StateEffect.define<readonly number[]>();
-export const openComposer = StateEffect.define<number | null>();
+const setThreads = StateEffect.define<readonly number[]>();
+const openComposer = StateEffect.define<number | null>();
 const setHover = StateEffect.define<number | null>();
 
 type Slots = { lines: readonly number[]; composer: number | null };

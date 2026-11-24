@@ -58,7 +58,7 @@ function rowGroups(tasks: TrackedTask[]): RowGroup[] {
   return groups;
 }
 
-export function taskAriaLabel(task: TrackedTask): string {
+function taskAriaLabel(task: TrackedTask): string {
   const state =
     task.state === "in_progress"
       ? "in progress"

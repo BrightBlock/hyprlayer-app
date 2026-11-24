@@ -100,7 +100,7 @@ type Slot = {
 };
 type Phase = { label: string; name: string; slots: Slot[]; todo: TimelineTask | null; added: TimelineTask[] };
 
-export type PlanMatch = { phaseLabel: string; taskKey: string | null };
+type PlanMatch = { phaseLabel: string; taskKey: string | null };
 
 // `taken` lets the tracker skip rows another todo already holds; `taskKey: null` is a phase-level match.
 export function matchTodoToPlan(

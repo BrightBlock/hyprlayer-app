@@ -1,5 +1,6 @@
 import { Icon } from "@/components/Icon";
 import { cx } from "@/components/ui";
+import { plural } from "@/lib/format";
 import type { RunningSubagent } from "@/features/session/subagent";
 
 import type { StageBadge } from "./lifecycleSlot";
@@ -13,13 +14,13 @@ function subagentLine(s: RunningSubagent): string {
     parts.push(`${s.steps.done} of ${s.steps.total} steps`);
     if (s.steps.current) parts.push(s.steps.current);
   } else if (s.tools > 0) {
-    parts.push(`${s.tools} tool${s.tools === 1 ? "" : "s"}`);
+    parts.push(plural(s.tools, "tool"));
     if (s.lastTool) parts.push(s.lastTool);
   }
   return parts.join(" · ");
 }
 
-export function CurrentTaskCard({
+function CurrentTaskCard({
   current,
   pulse,
 }: {

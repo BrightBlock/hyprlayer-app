@@ -13,7 +13,7 @@ export type ReviewMessageItem = {
   note?: { kind: ReviewNoteKind; body: string };
 };
 
-export type ReviewMessage = {
+type ReviewMessage = {
   viewed: number;
   files: number;
   count: number;

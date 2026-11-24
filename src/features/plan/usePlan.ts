@@ -9,7 +9,7 @@ export const FLASH_MS = 1000;
 
 const NO_CHANGES: ReadonlySet<string> = new Set();
 
-export function planSections(plan: PlanDoc): Map<string, string> {
+function planSections(plan: PlanDoc): Map<string, string> {
   const sections = new Map<string, string>([
     ["header", JSON.stringify([plan.title, plan.status, plan.author])],
     ["overview", plan.overview],

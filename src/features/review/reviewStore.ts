@@ -2,12 +2,12 @@ import { create } from "zustand";
 
 export type ReviewGroupBy = "task" | "folder";
 
-export type WorkstreamReviewState = { selected: string | null; filter: string; groupBy: ReviewGroupBy };
+type WorkstreamReviewState = { selected: string | null; filter: string; groupBy: ReviewGroupBy };
 
 const INITIAL: WorkstreamReviewState = { selected: null, filter: "", groupBy: "folder" };
 
 // Survives the workspace unmounting, so "← Chat" and back lands on the same file.
-export const useReviewStore = create<{ byWs: Record<string, WorkstreamReviewState>; submitRequest: string | null }>(
+const useReviewStore = create<{ byWs: Record<string, WorkstreamReviewState>; submitRequest: string | null }>(
   () => ({ byWs: {}, submitRequest: null }),
 );
 

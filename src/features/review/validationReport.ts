@@ -3,7 +3,7 @@ import { VALIDATE_PROMPT } from "@/features/session/sessionStore";
 import type { TranscriptItem } from "@/features/session/transcript";
 
 // `parsed` is the instant fallback; the summarizer's reading replaces it when it lands.
-export type FoundReport = { itemId: string; text: string; parsed: ValidationSummary };
+type FoundReport = { itemId: string; text: string; parsed: ValidationSummary };
 
 type SectionKey = "status" | "checks" | "findings" | "matches" | "deviations" | "issues" | "manual" | "recs" | "gate";
 
@@ -69,7 +69,7 @@ function reportStart(text: string): number {
   return text.search(REPORT_HEADING);
 }
 
-export function parseValidationReport(text: string): ValidationSummary {
+function parseValidationReport(text: string): ValidationSummary {
   const start = Math.max(0, reportStart(text));
   const sections = new Map<SectionKey, string[]>();
   let current: SectionKey | null = null;

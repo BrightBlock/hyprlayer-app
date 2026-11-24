@@ -7,7 +7,7 @@ import { useWrittenDocs } from "@/features/session/writtenDocs";
 import { useUiStore, type UiStore } from "@/lib/uiStore";
 
 // `key` is a plan doc path or the inline key; `followLatest` keeps the newest revision's card active.
-export type PlanSelection = { key: string; cardId: string | null; followLatest: boolean };
+type PlanSelection = { key: string; cardId: string | null; followLatest: boolean };
 
 type AsideSnapshot = { view: UiStore["asideView"]; hidden: boolean; drawer: UiStore["narrowDrawer"] };
 
@@ -48,10 +48,6 @@ export function asideShowsPlan(ui: UiSlice, narrow: boolean): boolean {
   return ui.asideView === "plan" && (narrow ? ui.narrowDrawer === "diff" : !ui.diffHidden);
 }
 
-export function selectPlan(sessionId: string, selection: PlanSelection): void {
-  usePlanPreviewStore.setState((s) => ({ bySession: { ...s.bySession, [sessionId]: selection } }));
-}
-
 export function openPlanPreview(sessionId: string, selection: PlanSelection): void {
   const { narrow } = usePlanPreviewStore.getState();
   const ui = useUiStore.getState();
@@ -60,7 +56,7 @@ export function openPlanPreview(sessionId: string, selection: PlanSelection): vo
       returnTo: { view: ui.asideView, hidden: ui.diffHidden, drawer: ui.narrowDrawer },
     });
   }
-  selectPlan(sessionId, selection);
+  usePlanPreviewStore.setState((s) => ({ bySession: { ...s.bySession, [sessionId]: selection } }));
   useUiStore.setState(
     narrow ? { asideView: "plan", narrowDrawer: "diff" } : { asideView: "plan", diffHidden: false },
   );
@@ -77,16 +73,12 @@ export function closePlanPreview(): void {
   card?.focus();
 }
 
-export function usePlanSelection(sessionId: string | undefined): PlanSelection | null {
-  return usePlanPreviewStore((s) => (sessionId ? (s.bySession[sessionId] ?? null) : null));
-}
-
 // A selection may predate the index learning the canonical path of a doc written through a symlink.
 export function useResolvedPlanSelection(
   sessionId: string | undefined,
   workstreamId: string | null,
 ): PlanSelection | null {
-  const selection = usePlanSelection(sessionId);
+  const selection = usePlanPreviewStore((s) => (sessionId ? (s.bySession[sessionId] ?? null) : null));
   const written = useWrittenDocs(workstreamId);
   return useMemo(
     () =>

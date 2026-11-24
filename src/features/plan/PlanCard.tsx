@@ -3,7 +3,7 @@ import { cx } from "@/components/ui";
 import type { PlanCardProps } from "@/features/session/planCardSlot";
 import { isInlinePlanKey } from "@/features/session/planPresentation";
 import { docTitle } from "@/features/session/toolDisplay";
-import { formatRelativeTime } from "@/lib/format";
+import { formatRelativeTime, plural } from "@/lib/format";
 import { useTickingNow } from "@/lib/useTickingNow";
 
 import { closePlanPreview, openPlanPreview, usePlanPreviewOpen, useResolvedPlanSelection } from "./planPreviewStore";
@@ -26,7 +26,7 @@ export function PlanCard({ sessionId, workstreamId, toolUseId, planKey, text, su
     ? "Plan · superseded"
     : [
         "Plan",
-        phases > 0 && `${phases} phase${phases === 1 ? "" : "s"}`,
+        phases > 0 && plural(phases, "phase"),
         mtimeMs !== null && formatRelativeTime(mtimeMs, now),
       ]
         .filter(Boolean)
