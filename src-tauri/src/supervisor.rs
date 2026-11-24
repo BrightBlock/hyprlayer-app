@@ -937,6 +937,26 @@ impl StderrFile {
     }
 }
 
+fn server_command(
+    bin: &Path,
+    app_config_dir: &Path,
+    app_data_dir: &Path,
+    app_log_dir: &Path,
+    webview_only_env: &[&str],
+) -> tokio::process::Command {
+    let mut cmd = tokio::process::Command::new(bin);
+    cmd.env("HYPRLAYER_APP_CONFIG_DIR", app_config_dir)
+        .env("HYPRLAYER_APP_DATA_DIR", app_data_dir)
+        .env(server_logging::LOG_DIR_ENV, app_log_dir)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null());
+    // A dev app started from an agent's shell must not hand that agent's identity to the server.
+    for var in AGENT_ENV.iter().chain(webview_only_env) {
+        cmd.env_remove(var);
+    }
+    cmd
+}
+
 /// Spawns the server as a deliberate orphan — the opposite of every other
 /// child this codebase spawns (`process/mod.rs`'s `Exec`/`spawn_supervised`
 /// both set `kill_on_drop(true)` on purpose; this one must outlive us).
@@ -957,16 +977,13 @@ fn spawn_detached(
             }
         }
     });
-    let mut cmd = tokio::process::Command::new(bin);
-    cmd.env("HYPRLAYER_APP_CONFIG_DIR", app_config_dir)
-        .env("HYPRLAYER_APP_DATA_DIR", app_data_dir)
-        .env(server_logging::LOG_DIR_ENV, app_log_dir)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null());
-    // A dev app started from an agent's shell must not hand that agent's identity to the server.
-    for var in AGENT_ENV {
-        cmd.env_remove(var);
-    }
+    let mut cmd = server_command(
+        bin,
+        app_config_dir,
+        app_data_dir,
+        app_log_dir,
+        &crate::webkit_env::set_by_app(),
+    );
     let written = match stderr {
         Some((file, dir, start)) => {
             cmd.stderr(Stdio::from(file));
@@ -1266,6 +1283,23 @@ async fn evict_and_respawn(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_server_drops_webkit_variables_only_the_app_set() {
+        let dir = Path::new("/tmp");
+        let removed = |webview_only_env: &[&str]| -> Vec<String> {
+            server_command(Path::new("server"), dir, dir, dir, webview_only_env)
+                .as_std()
+                .get_envs()
+                .filter(|(_, value)| value.is_none())
+                .map(|(key, _)| key.to_string_lossy().into_owned())
+                .collect()
+        };
+        let app_set = removed(&["WEBKIT_DISABLE_DMABUF_RENDERER"]);
+        assert!(app_set.contains(&"WEBKIT_DISABLE_DMABUF_RENDERER".to_string()));
+        let user_set = removed(&[]);
+        assert!(!user_set.iter().any(|key| key.starts_with("WEBKIT_")));
+    }
 
     fn host() -> Host {
         Host {
