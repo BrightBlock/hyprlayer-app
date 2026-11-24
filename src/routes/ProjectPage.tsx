@@ -566,6 +566,8 @@ export function ProjectPage() {
   const shells = tabs?.shells ?? [];
   const paneIds = tabs ? leaves(tabs.layout) : [];
   const focusedShell = tabs ? activeShellIn(tabs, focusedPaneId(tabs)) : null;
+  // The Lead's tab shows the Lead panel where a workstream shows its git state: the Lead never changes files.
+  const leadTab = !!lead?.view.sessionId && focusedShell?.sessionId === lead.view.sessionId;
   const zoomedPaneId =
     maximized && maximized.wsId === wsId && paneIds.length > 1 && paneIds.includes(maximized.paneId)
       ? maximized.paneId
@@ -1834,9 +1836,6 @@ export function ProjectPage() {
               className="absolute inset-y-0 right-0 flex flex-col"
               style={{ width: asideWidth }}
             >
-              {lead && focusedShell?.sessionId && focusedShell.sessionId === lead.view.sessionId && (
-                <LeadPanel projectPath={projectPath} views={views} className="max-h-[60%] shrink-0 border-b border-edge" />
-              )}
               {(planAside.available || goalAside.available) && (
                 <div className="flex h-9 shrink-0 items-center border-b border-edge px-2">
                   <SegmentedControl
@@ -1845,7 +1844,7 @@ export function ProjectPage() {
                     options={[
                       ...(planAside.available ? [{ value: "plan" as const, label: "Plan" }] : []),
                       ...(goalAside.available ? [{ value: "goal" as const, label: "Goal" }] : []),
-                      { value: "changes" as const, label: "Changes" },
+                      { value: "changes" as const, label: leadTab ? "Lead" : "Changes" },
                     ]}
                     onChange={goalAside.setView}
                   />
@@ -1865,6 +1864,11 @@ export function ProjectPage() {
                     onReviewChanges={openReview}
                   />
                 </div>
+              ) : leadTab ? (
+                <>
+                  <LeadPanel projectPath={projectPath} views={views} className="min-h-0 flex-1" />
+                  <SidebarTasksPanel sessionId={focusedShell?.sessionId} />
+                </>
               ) : (
                 <>
                   {!folderProject && <GitPanel view={activeView ?? null} />}
@@ -1892,7 +1896,7 @@ export function ProjectPage() {
                   orientation="right"
                 />
               )}
-              {!folderProject && <PrChecksPanel view={activeView ?? null} />}
+              {!folderProject && !leadTab && <PrChecksPanel view={activeView ?? null} />}
             </div>
           </aside>
         </>

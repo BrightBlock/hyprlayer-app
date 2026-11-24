@@ -24,6 +24,16 @@ const LIBRARY_LIST_WIDTH = 344;
 export const LIBRARY_LIST_MIN = 280;
 export const LIBRARY_LIST_MAX = 480;
 
+const LEAD_DOCK_WIDTH = 300;
+export const LEAD_DOCK_MIN = 240;
+export const LEAD_DOCK_MAX = 560;
+// What the expanded dock's Lead panel leaves for the Lead's chat.
+export const LEAD_DOCK_KEEP = 360;
+
+function storedSize(value: unknown, fallback: number, min: number, max: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? clamp(value, min, max) : fallback;
+}
+
 export type AsideView = "changes" | "plan" | "goal";
 
 export type UiStore = {
@@ -67,6 +77,10 @@ export type UiStore = {
   toggleDocRail: () => void;
   docRailWidth: number;
   setDocRailWidth: (width: number) => void;
+  leadDockWidth: number;
+  setLeadDockWidth: (width: number) => void;
+  leadPanelHidden: boolean;
+  toggleLeadPanel: () => void;
   docRailContentsCollapsed: boolean;
   toggleDocRailContents: () => void;
   docRailPropertiesCollapsed: boolean;
@@ -118,6 +132,11 @@ export const useUiStore = create<UiStore>()(
       toggleDocRail: () => set((state) => ({ docRailOpen: !state.docRailOpen })),
       docRailWidth: DOC_RAIL_WIDTH,
       setDocRailWidth: (width) => set({ docRailWidth: width }),
+      leadDockWidth: LEAD_DOCK_WIDTH,
+      setLeadDockWidth: (width) =>
+        set({ leadDockWidth: storedSize(width, LEAD_DOCK_WIDTH, LEAD_DOCK_MIN, LEAD_DOCK_MAX) }),
+      leadPanelHidden: false,
+      toggleLeadPanel: () => set((state) => ({ leadPanelHidden: !state.leadPanelHidden })),
       docRailContentsCollapsed: false,
       toggleDocRailContents: () =>
         set((state) => ({ docRailContentsCollapsed: !state.docRailContentsCollapsed })),
@@ -149,6 +168,8 @@ export const useUiStore = create<UiStore>()(
               ? p.workshopNavCollapsed
               : agentsCollapsed === true,
           leadDockExpanded: Array.isArray(p.leadDockExpanded) ? p.leadDockExpanded : [],
+          leadDockWidth: storedSize(p.leadDockWidth, LEAD_DOCK_WIDTH, LEAD_DOCK_MIN, LEAD_DOCK_MAX),
+          leadPanelHidden: p.leadPanelHidden === true,
         };
       },
       partialize: (s) => ({
@@ -167,6 +188,8 @@ export const useUiStore = create<UiStore>()(
         showDotFiles: s.showDotFiles,
         docRailOpen: s.docRailOpen,
         docRailWidth: s.docRailWidth,
+        leadDockWidth: s.leadDockWidth,
+        leadPanelHidden: s.leadPanelHidden,
         docRailContentsCollapsed: s.docRailContentsCollapsed,
         docRailPropertiesCollapsed: s.docRailPropertiesCollapsed,
       }),

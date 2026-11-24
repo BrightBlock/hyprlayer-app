@@ -16,7 +16,7 @@ import { errorMessage, errorRemedy } from "@/lib/ipc";
 import { formatChord, type Chord } from "@/lib/keybindings/chord";
 import { useEscape } from "@/lib/keybindings/registry";
 import { IS_MACOS } from "@/lib/platform";
-import { startEdgeDrag } from "@/lib/resize";
+import { keyedSize, startEdgeDrag } from "@/lib/resize";
 import { useFocusTrap } from "@/lib/useFocusTrap";
 import { useRovingRadio } from "@/lib/useRovingRadio";
 import { Icon, type IconName, type IconSize } from "./Icon";
@@ -1296,28 +1296,51 @@ export function RowSpine() {
 
 export function PaneSeparator({
   label,
-  width,
+  size,
   min,
   max,
+  axis = "x",
+  direction = 1,
+  className,
   onResize,
   onEnd,
 }: {
   label: string;
-  width: number;
+  size: number;
   min: number;
   max: number;
-  onResize: (width: number) => void;
+  axis?: "x" | "y";
+  // 1 when the panel grows as the handle moves right or down, -1 when it grows left or up.
+  direction?: 1 | -1;
+  className?: string;
+  onResize: (size: number) => void;
   onEnd?: () => void;
 }) {
+  const vertical = axis === "x";
   return (
     <div
       role="separator"
-      aria-orientation="vertical"
+      tabIndex={0}
+      aria-orientation={vertical ? "vertical" : "horizontal"}
       aria-label={label}
-      className="relative z-10 -mx-1 w-2 shrink-0 cursor-col-resize bg-transparent transition-colors hover:bg-edge/60"
+      aria-valuenow={Math.round(size)}
+      aria-valuemin={Math.round(min)}
+      aria-valuemax={Math.round(max)}
+      className={cx(
+        "relative z-10 shrink-0 bg-transparent hover:bg-edge/60 focus-visible:bg-accent/60 focus-visible:outline-none",
+        vertical ? "-mx-1 w-2 cursor-col-resize" : "-my-1 h-2 cursor-row-resize",
+        className,
+      )}
       onPointerDown={(e) =>
-        startEdgeDrag(e, { startWidth: width, min, max, direction: 1, onResize, onEnd })
+        startEdgeDrag(e, { startWidth: size, min, max, direction, axis, onResize, onEnd })
       }
+      onKeyDown={(e) => {
+        const next = keyedSize(e.key, e.shiftKey, { size, min, max, direction, axis });
+        if (next === null) return;
+        e.preventDefault();
+        onResize(next);
+        onEnd?.();
+      }}
     />
   );
 }

@@ -44,3 +44,30 @@ export function startEdgeDrag(
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp, { once: true });
 }
+
+// The largest size that still leaves `keep` px of the container for its neighbour.
+// An unmeasured container (0) leaves the cap alone.
+export function maxBeside(container: number, keep: number, min: number, max: number): number {
+  if (container <= 0) return max;
+  return clamp(container - keep, min, max);
+}
+
+const KEY_STEP = 16;
+const KEY_STEP_LARGE = 64;
+
+// The size an arrow, Home or End key moves a separator to, or null for any other key.
+// Arrows move the handle; `direction` maps that onto the panel's size.
+export function keyedSize(
+  key: string,
+  shift: boolean,
+  { size, min, max, direction, axis }: { size: number; min: number; max: number; direction: 1 | -1; axis: "x" | "y" },
+): number | null {
+  const step = shift ? KEY_STEP_LARGE : KEY_STEP;
+  const back = axis === "x" ? "ArrowLeft" : "ArrowUp";
+  const forward = axis === "x" ? "ArrowRight" : "ArrowDown";
+  if (key === back) return clamp(size - direction * step, min, max);
+  if (key === forward) return clamp(size + direction * step, min, max);
+  if (key === "Home") return min;
+  if (key === "End") return max;
+  return null;
+}

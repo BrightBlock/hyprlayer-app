@@ -15,7 +15,7 @@ import { answerQuestion, useSessionStore } from "@/features/session/sessionStore
 import { isWorking, type TranscriptItem } from "@/features/session/transcript";
 import { nextDockPhase, type DockEvent, type DockPhase } from "./dockPhase";
 import { LeadMark } from "./LeadChip";
-import { LeadPanel } from "./LeadPanel";
+import { LeadDockSplit } from "./LeadSplit";
 import { clearLeadNote, useFollowLead, useLeadNote, type LeadAsk, type LeadNote, type ProjectLead } from "./lead";
 
 function latestReply(items: readonly TranscriptItem[]): string | null {
@@ -292,7 +292,7 @@ export function LeadDock({
           <div style={contentStyle} className="flex min-h-0 flex-1 flex-col">
             {note && workstreamId && <NoteStrip note={note} workstreamId={workstreamId} />}
             {/* SessionChat's transcript slides 36px up under its own header; this clip keeps it off the dock's. */}
-            <div className="flex min-h-0 flex-1 border-t border-edge-2">
+            <LeadDockSplit projectPath={projectPath} views={views}>
               <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
                 {chat ?? (
                   <div className="flex flex-1 items-center justify-center">
@@ -300,8 +300,7 @@ export function LeadDock({
                   </div>
                 )}
               </div>
-              <LeadPanel projectPath={projectPath} views={views} className="w-[300px] shrink-0 border-l border-edge" />
-            </div>
+            </LeadDockSplit>
           </div>
         </div>
       )}

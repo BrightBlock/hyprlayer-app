@@ -30,6 +30,11 @@ export function useCommand(id: string, handler: (() => void) | null): void {
   }, [id, enabled]);
 }
 
+// True while some mounted component handles the command, for chrome that offers it only then.
+export function useHasCommand(id: string): boolean {
+  return useRegistry((s) => (s.handlers[id]?.length ?? 0) > 0);
+}
+
 export const ESCAPE_COMMAND_ID = "ui.escape";
 
 export function useEscape(handler: (() => void) | null): void {

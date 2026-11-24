@@ -57,7 +57,7 @@ export function PaneFrame({
       {!overlayNav && (
         <PaneSeparator
           label={listLabel}
-          width={listWidth}
+          size={listWidth}
           min={listMin}
           max={listMax}
           onResize={setDragWidth}

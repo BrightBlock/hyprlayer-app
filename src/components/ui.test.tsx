@@ -13,6 +13,7 @@ import {
   DropdownSelect,
   Field,
   IconButton,
+  PaneSeparator,
   MenuItem,
   Popover,
   rowClass,
@@ -675,5 +676,27 @@ describe("Dialog focus management", () => {
   it("is named by its visible title", () => {
     render(<Dialog open onClose={() => {}} title="New folder">x</Dialog>);
     expect(screen.getByRole("dialog", { name: "New folder" })).toBeTruthy();
+  });
+});
+
+describe("PaneSeparator", () => {
+  it("resizes from the keyboard within its bounds and commits each step", () => {
+    const onResize = vi.fn();
+    const onEnd = vi.fn();
+    render(
+      <PaneSeparator label="Resize" axis="y" size={300} min={120} max={310} onResize={onResize} onEnd={onEnd} />,
+    );
+    const handle = screen.getByRole("separator", { name: "Resize" });
+    expect(handle.tabIndex).toBe(0);
+    expect(handle.getAttribute("aria-valuenow")).toBe("300");
+
+    fireEvent.keyDown(handle, { key: "ArrowDown" });
+    expect(onResize).toHaveBeenLastCalledWith(310);
+    fireEvent.keyDown(handle, { key: "Home" });
+    expect(onResize).toHaveBeenLastCalledWith(120);
+    expect(onEnd).toHaveBeenCalledTimes(2);
+
+    fireEvent.keyDown(handle, { key: "ArrowLeft" });
+    expect(onResize).toHaveBeenCalledTimes(2);
   });
 });

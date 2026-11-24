@@ -77,7 +77,7 @@ import { useLibraryScope } from "@/features/library/libraryScope";
 import { asLibraryBox, LIBRARY_BOXES } from "@/features/library/libraryBoxes";
 import { LibrarySyncButton } from "@/features/library/LibrarySyncButton";
 import { onboardingDismissed } from "./onboardingState";
-import { useCommand, useEscape } from "@/lib/keybindings/registry";
+import { runCommand, useCommand, useEscape, useHasCommand } from "@/lib/keybindings/registry";
 import { useKeybindings } from "@/lib/keybindings/useKeybindings";
 import type { Overrides } from "@/lib/keybindings/resolve";
 import { useAppZoomCommands, useTitlebarInsetLights } from "@/lib/appearance";
@@ -666,6 +666,8 @@ export function Root() {
   const agentCount = useAgentTabCount(onBoard ? null : (activeWorkstreamId ?? null));
   const toggleDiff = useUiStore((state) => state.toggleDiff);
   const diffShown = narrow ? narrowDrawer === "diff" : !diffHidden;
+  const leadPanelHidden = useUiStore((state) => state.leadPanelHidden);
+  const leadPanelOnBoard = useHasCommand("view.toggleLeadPanel") && onBoard;
   const toggleDiffOrDrawer = () => {
     if (narrow) setNarrowDrawer(narrowDrawer === "diff" ? null : "diff");
     else toggleDiff();
@@ -1043,6 +1045,17 @@ export function Root() {
             <SettingsButton />
             {currentProject && (
               <>
+                {leadPanelOnBoard && (
+                  <button
+                    type="button"
+                    onClick={() => runCommand("view.toggleLeadPanel")}
+                    className={topIconClass}
+                    title={leadPanelHidden ? "Show Lead panel" : "Hide Lead panel"}
+                    aria-label={leadPanelHidden ? "Show Lead panel" : "Hide Lead panel"}
+                  >
+                    <Icon name="panels" />
+                  </button>
+                )}
                 {currentSection === "Agent" && !onBoard && (
                   <button
                     type="button"

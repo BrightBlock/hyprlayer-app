@@ -89,6 +89,13 @@ export const COMMANDS: CommandDef[] = [
     defaults: { mac: "mod+shift+b", other: "mod+shift+b" },
   },
   {
+    id: "view.toggleLeadPanel",
+    label: "Toggle Lead Panel",
+    category: "View",
+    when: "project",
+    defaults: { mac: "mod+shift+l", other: "mod+shift+l" },
+  },
+  {
     id: "view.toggleArchivedAgents",
     label: "Toggle Archived Sessions",
     category: "View",
