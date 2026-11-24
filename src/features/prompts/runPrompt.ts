@@ -1,6 +1,7 @@
 
 import { commands, type CustomPrompt, type WorkstreamView } from "@/lib/bindings";
 import { unwrap } from "@/lib/ipc";
+import { showFailure } from "@/lib/toast";
 import { runPromptTextInWorkstream } from "@/features/session/sessionStore";
 import {
   bodyHasVars,
@@ -53,7 +54,11 @@ export async function runCustomPrompt(
   prompt: CustomPrompt,
   targetShellId?: number,
 ): Promise<void> {
-  const resolved = await resolveCustomPrompt(view.item.id, view.item.projectPath, prompt);
-  if (!resolved) return;
-  await runPromptTextInWorkstream(view.item.id, resolved.text, resolved.title, targetShellId);
+  try {
+    const resolved = await resolveCustomPrompt(view.item.id, view.item.projectPath, prompt);
+    if (!resolved) return;
+    await runPromptTextInWorkstream(view.item.id, resolved.text, resolved.title, targetShellId);
+  } catch (e) {
+    showFailure(`Couldn't run ${prompt.name || "the prompt"}`)(e);
+  }
 }

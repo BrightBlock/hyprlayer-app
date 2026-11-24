@@ -1990,17 +1990,21 @@ export async function respondPermission(
   message: string | null,
 ): Promise<void> {
   const current = entryOf(sessionId);
-  if (current) {
-    setEntry(sessionId, {
-      ...current,
-      ...resolvePermission(current, requestId, allow ? "allow" : "deny"),
-    });
-  }
+  if (current) setEntry(sessionId, { ...current, ...resolvePermission(current, requestId, allow ? "allow" : "deny") });
+  const answered = entryOf(sessionId);
   if (!channels.has(sessionId)) {
     await resumeSession(sessionId);
     return;
   }
-  await unwrap(commands.respondPermission(sessionId, requestId, allow, message));
+  await unwrap(commands.respondPermission(sessionId, requestId, allow, message)).catch((e: unknown) => {
+    reopenAsk(sessionId, answered, current);
+    throw e;
+  });
+}
+
+// The ask closes before the answer is sent; one the server never got must stay answerable.
+function reopenAsk(sessionId: string, answered: SessionEntry | undefined, before: SessionEntry | undefined) {
+  if (answered && before && entryOf(sessionId) === answered) setEntry(sessionId, before);
 }
 
 export async function answerQuestion(
@@ -2009,14 +2013,16 @@ export async function answerQuestion(
   answers: Record<string, string>,
 ): Promise<void> {
   const current = entryOf(sessionId);
-  if (current) {
-    setEntry(sessionId, { ...current, ...resolveQuestion(current, requestId) });
-  }
+  if (current) setEntry(sessionId, { ...current, ...resolveQuestion(current, requestId) });
+  const answered = entryOf(sessionId);
   if (!channels.has(sessionId)) {
     await resumeSession(sessionId);
     return;
   }
-  await unwrap(commands.answerQuestion(sessionId, requestId, answers));
+  await unwrap(commands.answerQuestion(sessionId, requestId, answers)).catch((e: unknown) => {
+    reopenAsk(sessionId, answered, current);
+    throw e;
+  });
 }
 
 export async function allowForSession(

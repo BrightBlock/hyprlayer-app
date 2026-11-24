@@ -22,7 +22,7 @@ import { eventToChord, formatChord, hasPrimaryModifier } from "@/lib/keybindings
 import { effectiveChord } from "@/lib/keybindings/resolve";
 import { basename } from "@/lib/path";
 import { IS_MACOS } from "@/lib/platform";
-import { useToast } from "@/lib/toast";
+import { showFailure, useToast } from "@/lib/toast";
 import {
   useBootstrap,
   useClaudeProbe,
@@ -1256,9 +1256,10 @@ export function SessionChat({
 
   const permission: PermissionHandlers = useMemo(
     () => ({
-      onAllow: (rid) => sid && void respondPermission(sid, rid, true, null),
-      onAllowForSession: (rid, tool) => sid && void allowForSession(sid, rid, tool),
-      onDeny: (rid) => sid && void respondPermission(sid, rid, false, null),
+      onAllow: (rid) => sid && void respondPermission(sid, rid, true, null).catch(showFailure("Allow didn't reach the agent")),
+      onAllowForSession: (rid, tool) =>
+        sid && void allowForSession(sid, rid, tool).catch(showFailure("Allow didn't reach the agent")),
+      onDeny: (rid) => sid && void respondPermission(sid, rid, false, null).catch(showFailure("Deny didn't reach the agent")),
     }),
     [sid],
   );
@@ -1517,7 +1518,10 @@ export function SessionChat({
                     key={pendingQuestion.requestId}
                     pending={pendingQuestion}
                     onSubmit={(answers) =>
-                      sid && void answerQuestion(sid, pendingQuestion.requestId, answers)
+                      sid &&
+                      void answerQuestion(sid, pendingQuestion.requestId, answers).catch(
+                        showFailure("Your answer didn't reach the agent"),
+                      )
                     }
                   />
                 )}

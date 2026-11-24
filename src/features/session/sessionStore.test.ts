@@ -1381,6 +1381,41 @@ describe("answering a question", () => {
   });
 });
 
+describe("answering an ask while the server is down", () => {
+  const DOWN = {
+    status: "error" as const,
+    error: { code: "server_unavailable", message: "The server is not connected.", remedy: null },
+  };
+
+  it("keeps the permission prompt when the answer never arrived", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit({ kind: "permissionAsk", requestId: "req-1", toolName: "Bash", input: "{}" });
+    h.respondPermission.mockResolvedValueOnce(DOWN as never);
+
+    await expect(respondPermission(id, "req-1", true, null)).rejects.toMatchObject({
+      code: "server_unavailable",
+    });
+
+    const asked = entryOf(id).items.find((it) => it.kind === "permission");
+    expect(entryOf(id).pendingPermission?.requestId).toBe("req-1");
+    expect(asked?.kind === "permission" ? asked.decision : "missing").toBeNull();
+  });
+
+  it("keeps the question prompt when the answer never arrived", async () => {
+    const id = await startBusySession();
+    emit(INIT);
+    emit(QUESTION_ASK);
+    h.answerQuestion.mockResolvedValueOnce(DOWN as never);
+
+    await expect(answerQuestion(id, "q-1", { "Which?": "A" })).rejects.toMatchObject({
+      code: "server_unavailable",
+    });
+
+    expect(entryOf(id).pendingQuestion?.requestId).toBe("q-1");
+  });
+});
+
 describe("transcript sync: queue and reload", () => {
   const SELF = { clientId: "me", device: "my-mac" };
   const OTHER = { clientId: "them", device: "jons-macbook-pro" };

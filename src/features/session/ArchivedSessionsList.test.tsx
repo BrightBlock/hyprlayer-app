@@ -19,8 +19,21 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { runCommand } from "@/lib/keybindings/registry";
+import { useToast } from "@/lib/toast";
 
-const h = vi.hoisted(() => ({ useConnectionStatus: vi.fn(), dropSession: vi.fn() }));
+const h = vi.hoisted(() => ({
+  useConnectionStatus: vi.fn(),
+  dropSession: vi.fn(),
+  setSessionArchived: vi.fn(),
+  deleteSession: vi.fn(),
+}));
+vi.mock("@/lib/bindings", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/bindings")>();
+  return {
+    ...actual,
+    commands: { ...actual.commands, setSessionArchived: h.setSessionArchived, deleteSession: h.deleteSession },
+  };
+});
 vi.mock("@/lib/queries", () => ({
   useConnectionStatus: h.useConnectionStatus,
   useClaudeProbe: () => ({ data: undefined }),
@@ -39,6 +52,12 @@ import {
   useWorkstreamTabsStore,
   type ShellTab,
 } from "./workstreamTabs";
+
+const OK = { status: "ok" as const, data: null };
+const REFUSED = {
+  status: "error" as const,
+  error: { code: "server_unavailable", message: "The server is not connected.", remedy: null },
+};
 
 const HOUR = 3_600_000;
 const DAY = 24 * HOUR;
@@ -94,6 +113,9 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(NOW);
   h.useConnectionStatus.mockReturnValue({ data: { state: "connected" } });
+  h.setSessionArchived.mockResolvedValue(OK);
+  h.deleteSession.mockResolvedValue(OK);
+  useToast.setState({ title: "", message: "" });
   seed();
 });
 
@@ -275,5 +297,23 @@ describe("ArchivedSessionsList", () => {
       runCommand("view.toggleArchivedAgents");
     });
     expect(popover()).toBeNull();
+  });
+
+  it("shows a toast when the server refuses a delete", async () => {
+    h.deleteSession.mockResolvedValue(REFUSED);
+    openPopover();
+    fireEvent.click(within(askDelete("Spike codex")).getByRole("button", { name: "Delete" }));
+
+    await waitFor(() => expect(useToast.getState().title).toBe("Couldn't delete the agent"));
+    expect(h.deleteSession).toHaveBeenCalledWith("sess-6");
+  });
+
+  it("shows a toast when the server refuses a restore", async () => {
+    h.setSessionArchived.mockResolvedValue(REFUSED);
+    openPopover();
+    fireEvent.click(within(rowFor("Spike codex")).getByRole("button", { name: "Restore Spike codex" }));
+
+    await waitFor(() => expect(useToast.getState().title).toBe("Couldn't restore the agent"));
+    expect(h.setSessionArchived).toHaveBeenCalledWith("sess-6", false);
   });
 });

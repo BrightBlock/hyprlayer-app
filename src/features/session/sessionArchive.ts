@@ -2,6 +2,7 @@ import { commands, type Session } from "@/lib/bindings";
 import { isAppError, unwrap } from "@/lib/ipc";
 import { log } from "@/lib/log";
 import { queryClient } from "@/lib/queryClient";
+import { showFailure } from "@/lib/toast";
 
 // The server refuses a mid-turn archive, so the UI never offers one.
 export function canArchiveSession(session: Pick<Session, "working">): boolean {
@@ -21,6 +22,7 @@ export async function setSessionArchived(
     await refresh(workstreamId);
   } catch (e) {
     log.warn("session", `${archived ? "archiving" : "unarchiving"} ${sessionId} failed`, e);
+    showFailure(archived ? "Couldn't archive the agent" : "Couldn't restore the agent")(e);
   }
 }
 
@@ -40,6 +42,7 @@ export async function archiveStoppedSession(workstreamId: string, sessionId: str
         continue;
       }
       log.warn("session", `archiving stopped ${sessionId} failed`, e);
+      showFailure("Couldn't archive the agent")(e);
       return;
     }
   }
@@ -53,5 +56,6 @@ export async function deleteServerSession(workstreamId: string, sessionId: strin
     await refresh(workstreamId);
   } catch (e) {
     log.warn("session", `deleting ${sessionId} failed`, e);
+    showFailure("Couldn't delete the agent")(e);
   }
 }

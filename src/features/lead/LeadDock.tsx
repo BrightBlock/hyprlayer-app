@@ -7,7 +7,7 @@ import { openExternalUrl } from "@/lib/browser";
 import { formatCompactAge } from "@/lib/format";
 import { errorMessage } from "@/lib/ipc";
 import { useMessageLead, useSetLeadRemoteControl, useWorkstreamSessions } from "@/lib/queries";
-import { useToast } from "@/lib/toast";
+import { showFailure, useToast } from "@/lib/toast";
 import { useReducedMotion } from "@/lib/useReducedMotion";
 import { useSlowNow } from "@/lib/useSlowNow";
 import { QuestionPrompt } from "@/features/session/QuestionPrompt";
@@ -253,7 +253,11 @@ export function LeadDock({
             <QuestionPrompt
               key={ask.question.requestId}
               pending={ask.question}
-              onSubmit={(answers) => void answerQuestion(ask.sessionId, ask.question.requestId, answers)}
+              onSubmit={(answers) =>
+                void answerQuestion(ask.sessionId, ask.question.requestId, answers).catch(
+                  showFailure("Your answer didn't reach the Lead"),
+                )
+              }
             />
           )}
           <div className="rounded-card border border-edge bg-surface focus-within:border-ink-dim/70">
