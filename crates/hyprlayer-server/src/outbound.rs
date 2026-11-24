@@ -438,8 +438,8 @@ impl Outbound {
     }
 
     /// A request's turn to run, from the bulk pool or the other; hold it until its answer is
-    /// written. `None` once the connection is gone: what it sent still runs, since a launch or
-    /// a failed start's record may hang on it, and only the answer is lost.
+    /// written. The pools stay open once the connection is gone: what it sent still runs, since a
+    /// launch or a failed start's record may hang on it, but no faster than while it was connected.
     pub async fn request_slot(&self, bulk: bool) -> Option<OwnedSemaphorePermit> {
         let pool = if bulk { &self.0.bulk } else { &self.0.calls };
         pool.clone().acquire_owned().await.ok()
@@ -605,7 +605,7 @@ impl Outbound {
         self.0.wake.notify_one();
     }
 
-    /// Drops everything queued and every request still waiting for its turn.
+    /// Drops everything queued; requests still waiting for their turn keep waiting.
     pub fn close(&self) {
         let dropped = {
             let mut lanes = self.lock();
@@ -614,8 +614,6 @@ impl Outbound {
             dropped
         };
         drop(dropped);
-        self.0.bulk.close();
-        self.0.calls.close();
         self.0.wake.notify_one();
         self.0.gone.notify_waiters();
         self.0.reported.notify_waiters();
@@ -835,5 +833,26 @@ mod tests {
             ));
             while out.lock().next_unit(true, true, true).is_some() {}
         }
+    }
+
+    #[tokio::test]
+    async fn a_closed_connection_still_runs_its_requests_no_more_than_the_cap_at_once() {
+        let out = Outbound::new(Features::ALL, false);
+        let mut held = Vec::new();
+        for _ in 0..CALLS_IN_FLIGHT {
+            held.push(out.request_slot(false).await);
+        }
+        out.close();
+        let waiting = tokio::time::timeout(
+            std::time::Duration::from_millis(50),
+            out.request_slot(false),
+        )
+        .await;
+        assert!(
+            waiting.is_err(),
+            "a request past the cap ran once the connection closed"
+        );
+        held.pop();
+        assert!(out.request_slot(false).await.is_some());
     }
 }
