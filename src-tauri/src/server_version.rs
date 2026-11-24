@@ -73,7 +73,7 @@ fn fit_against(reported: Option<&str>, shipped: &str) -> Fit {
     }
 }
 
-fn exact_fit_against(reported: Option<&str>, shipped: &str) -> Fit {
+pub(crate) fn exact_fit_against(reported: Option<&str>, shipped: &str) -> Fit {
     let fit = fit_against(reported, shipped);
     let other_build = reported.map(str::trim).is_some_and(|reported| {
         reported != shipped && (reported.contains('+') || shipped.contains('+'))

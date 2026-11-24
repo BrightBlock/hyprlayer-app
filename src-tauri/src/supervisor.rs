@@ -142,9 +142,22 @@ pub async fn connect(
             }
             Outcome::Connected { client, .. } => {
                 let expected = provision::sha256_file(&server_binary());
-                let fit = server_version::exact_fit(client.server_semver());
-                let outdated = is_outdated(fit, &client, expected.as_deref());
-                Outcome::Connected { client, outdated }
+                if replaces_own_build(
+                    client.server_semver(),
+                    SERVER_VERSION,
+                    client.server_build(),
+                    expected.as_deref(),
+                ) {
+                    log::warn!(
+                        "replacing the running server {}: this app ships {SERVER_VERSION}",
+                        server_version::describe(client.server_semver())
+                    );
+                    replace_own_server(client, app_config_dir, app_data_dir, app_log_dir).await
+                } else {
+                    let fit = server_version::exact_fit(client.server_semver());
+                    let outdated = is_outdated(fit, &client, expected.as_deref());
+                    Outcome::Connected { client, outdated }
+                }
             }
             blocked => blocked,
         },
@@ -221,6 +234,24 @@ fn is_outdated(fit: Fit, client: &RpcClient, expected_build: Option<&str>) -> bo
                 && expected_build.is_some_and(|expected| client.server_build() != Some(expected))
         }
     }
+}
+
+/// A dev install's own server from another build is replaced, not merely
+/// flagged. `sibling` is the hash of the binary a replacement would start: when
+/// that is what already runs, an older app still open would only restart it.
+fn replaces_own_build(
+    reported: Option<&str>,
+    shipped: &str,
+    running: Option<&str>,
+    sibling: Option<&str>,
+) -> bool {
+    let dev = reported.is_some_and(|r| r.contains('+')) || shipped.contains('+');
+    let other = match server_version::exact_fit_against(reported, shipped) {
+        Fit::OtherBuild => true,
+        Fit::Older => dev,
+        Fit::TooOld | Fit::Current => false,
+    };
+    other && sibling.is_some_and(|sibling| running != Some(sibling))
 }
 
 async fn connect_local_profile(data_dir: &Path, name: &str) -> Outcome {
@@ -1227,6 +1258,67 @@ mod tests {
             destination: "nexus".into(),
             label: "nexus".into(),
         }
+    }
+
+    #[test]
+    fn another_dev_build_of_the_own_server_is_replaced() {
+        let ours = Some("sha-ours");
+        let theirs = Some("sha-theirs");
+        assert!(replaces_own_build(
+            Some("999.1.0+dev.677.5c1544f5"),
+            "999.1.0+dev.734.c8739985",
+            theirs,
+            ours
+        ));
+        assert!(replaces_own_build(
+            Some("999.0.0+dev.aaa"),
+            "999.1.0+dev.bbb",
+            theirs,
+            ours
+        ));
+        assert!(replaces_own_build(
+            Some("999.1.0"),
+            "999.1.0+dev.bbb",
+            None,
+            ours
+        ));
+    }
+
+    #[test]
+    fn the_own_server_is_kept_when_a_replacement_would_start_the_same_binary() {
+        let reported = Some("999.1.0+dev.aaa");
+        let shipped = "999.1.0+dev.bbb";
+        assert!(!replaces_own_build(
+            reported,
+            shipped,
+            Some("sha"),
+            Some("sha")
+        ));
+        assert!(!replaces_own_build(reported, shipped, Some("sha"), None));
+    }
+
+    #[test]
+    fn release_servers_and_matching_builds_are_not_replaced_by_build() {
+        let (theirs, ours) = (Some("sha-theirs"), Some("sha-ours"));
+        assert!(!replaces_own_build(
+            Some("999.0.0"),
+            "999.1.0",
+            theirs,
+            ours
+        ));
+        assert!(!replaces_own_build(
+            Some("999.1.0"),
+            "999.1.0",
+            theirs,
+            ours
+        ));
+        assert!(!replaces_own_build(
+            Some("999.1.0+dev.aaa"),
+            "999.1.0+dev.aaa",
+            theirs,
+            ours
+        ));
+        assert!(!replaces_own_build(None, "999.1.0+dev.aaa", theirs, ours));
     }
 
     #[test]
