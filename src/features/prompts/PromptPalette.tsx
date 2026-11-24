@@ -5,6 +5,8 @@ import type { CustomPrompt, WorkstreamView } from "@/lib/bindings";
 import { useBootstrap } from "@/lib/queries";
 import { IS_MACOS } from "@/lib/platform";
 import { ChordHint, Kbd, rowClass } from "@/components/ui";
+import { useEscape } from "@/lib/keybindings/registry";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 import { effectiveChord, type Overrides } from "@/lib/keybindings/resolve";
 import { Icon } from "@/components/Icon";
 import { isFolderWorkstream } from "@/lib/domain/projects";
@@ -41,12 +43,14 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEscape(open ? closePromptPalette : null);
+  const onTrapKeyDown = useFocusTrap(panelRef, open, { initialFocusRef: inputRef });
 
   useEffect(() => {
     if (open) {
       setQuery("");
       setActiveIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 0);
     }
   }, [open]);
 
@@ -165,8 +169,12 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
         aria-haspopup="listbox"
         aria-expanded={true}
         aria-label="Prompt library"
+        ref={panelRef}
         className="w-full max-w-xl overflow-hidden rounded-lg border border-edge bg-panel shadow-2xl"
-        onKeyDown={handleKeyDown}
+        onKeyDown={(e) => {
+          onTrapKeyDown(e);
+          handleKeyDown(e);
+        }}
       >
         <div className="flex items-center gap-2 border-b border-edge px-4 py-3">
           <Icon name="prompt" className="text-ink-dim" />
@@ -177,12 +185,6 @@ export function PromptPalette({ activeWorkstream }: { activeWorkstream: Workstre
             onChange={(e) => {
               setQuery(e.target.value);
               setActiveIndex(0);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                e.stopPropagation();
-                closePromptPalette();
-              }
             }}
             placeholder="Run a prompt…"
             className="flex-1 bg-transparent text-body text-ink outline-none placeholder:text-ink-dim/50"

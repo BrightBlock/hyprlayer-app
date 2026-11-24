@@ -9,6 +9,8 @@ import { openDocPreviewTab } from "@/features/session/workstreamTabs";
 import { Icon, type IconName } from "@/components/Icon";
 import { ActivityDot } from "@/components/ActivityDot";
 import { Kbd, rowClass } from "@/components/ui";
+import { useEscape } from "@/lib/keybindings/registry";
+import { useFocusTrap } from "@/lib/useFocusTrap";
 
 
 const KIND_ICON: Record<SearchResult["kind"], IconName> = {
@@ -158,6 +160,9 @@ export function SearchPalette() {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEscape(open ? closeSearch : null);
+  const onTrapKeyDown = useFocusTrap(panelRef, open, { initialFocusRef: inputRef });
 
   const activeWorkstreamId = useActiveWorkstreamId();
   const allResults = useSearchSources(query, activeWorkstreamId);
@@ -170,7 +175,6 @@ export function SearchPalette() {
     if (open) {
       setQuery("");
       setActiveIndex(0);
-      setTimeout(() => inputRef.current?.focus(), 0);
     }
   }, [open]);
 
@@ -211,8 +215,12 @@ export function SearchPalette() {
         aria-haspopup="listbox"
         aria-expanded={true}
         aria-label="Search everything"
+        ref={panelRef}
         className="w-full max-w-xl overflow-hidden rounded-lg border border-edge bg-panel shadow-2xl"
-        onKeyDown={handleKeyDown}
+        onKeyDown={(e) => {
+          onTrapKeyDown(e);
+          handleKeyDown(e);
+        }}
       >
         <div className="flex items-center gap-2 border-b border-edge px-4 py-3">
           <Icon name="search" className="text-ink-dim" />
@@ -223,12 +231,6 @@ export function SearchPalette() {
             onChange={(e) => {
               setQuery(e.target.value);
               setActiveIndex(0);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                e.stopPropagation();
-                closeSearch();
-              }
             }}
             placeholder="Search workstreams, documents, agents…"
             className="flex-1 bg-transparent text-body text-ink outline-none placeholder:text-ink-dim/50"

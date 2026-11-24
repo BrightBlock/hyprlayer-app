@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -625,5 +625,55 @@ describe("Popover focus trap", () => {
     expect(screen.queryByRole("listbox")).toBeNull();
     expect(onClose).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Harness" }));
+  });
+});
+
+function DialogHarness({ autoFocusInput }: { autoFocusInput: boolean }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button onClick={() => setOpen(true)}>Open</button>
+      <Dialog open={open} onClose={() => setOpen(false)} title="New folder">
+        <input aria-label="Name" autoFocus={autoFocusInput} />
+        <button>Last</button>
+      </Dialog>
+    </>
+  );
+}
+
+describe("Dialog focus management", () => {
+  it("returns focus to the trigger after Escape", () => {
+    render(<DialogHarness autoFocusInput />);
+    const opener = screen.getByRole("button", { name: "Open" });
+    opener.focus();
+    fireEvent.click(opener);
+    expect(document.activeElement).toBe(screen.getByLabelText("Name"));
+    act(() => {
+      runCommand(ESCAPE_COMMAND_ID);
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(opener);
+  });
+
+  it("moves focus into the dialog when it opens", () => {
+    render(<DialogHarness autoFocusInput={false} />);
+    const opener = screen.getByRole("button", { name: "Open" });
+    opener.focus();
+    fireEvent.click(opener);
+    expect(screen.getByRole("dialog").contains(document.activeElement)).toBe(true);
+  });
+
+  it("keeps Tab inside the dialog", () => {
+    render(<DialogHarness autoFocusInput />);
+    fireEvent.click(screen.getByRole("button", { name: "Open" }));
+    const last = screen.getByRole("button", { name: "Last" });
+    last.focus();
+    fireEvent.keyDown(last, { key: "Tab" });
+    expect(document.activeElement).toBe(screen.getByLabelText("Name"));
+  });
+
+  it("is named by its visible title", () => {
+    render(<Dialog open onClose={() => {}} title="New folder">x</Dialog>);
+    expect(screen.getByRole("dialog", { name: "New folder" })).toBeTruthy();
   });
 });

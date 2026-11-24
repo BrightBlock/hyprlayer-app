@@ -54,7 +54,7 @@ export function useFocusTrap(
     document.addEventListener("pointerdown", onPointer, true);
     document.addEventListener("keydown", onKey, true);
     const panel = panelRef.current;
-    if (panel) {
+    if (panel && (initialFocusRef?.current || !panel.contains(document.activeElement))) {
       const target = initialFocusRef?.current ?? tabbables(panel)[0] ?? panel;
       target.focus({ preventScroll: true });
     }
@@ -68,7 +68,7 @@ export function useFocusTrap(
   }, [active]);
 
   return (e) => {
-    if (!active || e.key !== "Tab") return;
+    if (!active || e.key !== "Tab" || e.defaultPrevented) return;
     const panel = panelRef.current;
     // Focus inside a nested portal (a dropdown's listbox) keeps its own keys.
     if (!panel || !panel.contains(document.activeElement)) return;

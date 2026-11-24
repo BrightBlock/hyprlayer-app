@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { extendTailwindMerge } from "tailwind-merge";
 import type {
@@ -640,6 +640,16 @@ export function Dialog({
   closable = false,
 }: DialogProps) {
   useEscape(open ? onClose : null);
+  const titleId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Read during render: an autoFocus child takes focus at commit, before any effect could see the opener.
+  const openerRef = useRef<HTMLElement | null>(null);
+  const wasOpen = useRef(false);
+  if (open && !wasOpen.current) {
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }
+  wasOpen.current = open;
+  const onTrapKeyDown = useFocusTrap(panelRef, open, { restoreFocusRef: openerRef });
 
   if (!open) return null;
   return (
@@ -653,11 +663,15 @@ export function Dialog({
       }}
     >
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={ariaLabel}
+        aria-labelledby={!ariaLabel && title ? titleId : undefined}
+        tabIndex={-1}
+        onKeyDown={onTrapKeyDown}
         className={cx(
-          "flex max-h-full w-full animate-dialog-in flex-col overflow-hidden rounded-card border border-edge bg-panel shadow-2xl",
+          "flex max-h-full w-full animate-dialog-in outline-none flex-col overflow-hidden rounded-card border border-edge bg-panel shadow-2xl",
           DIALOG_SIZE[size],
           className,
         )}
@@ -670,7 +684,9 @@ export function Dialog({
             )}
           >
             {title ? (
-              <h2 className="min-w-0 text-body font-semibold text-ink">{title}</h2>
+              <h2 id={titleId} className="min-w-0 text-body font-semibold text-ink">
+                {title}
+              </h2>
             ) : (
               <span />
             )}
