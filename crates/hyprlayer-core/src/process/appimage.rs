@@ -36,15 +36,41 @@ const ALWAYS_UNSET: &[&str] = &[
     "GTK_THEME",
 ];
 
+/// The markers a claude session exports to its shells; inherited, they make a spawned claude a child session that saves no transcript.
+pub const CLAUDE_SESSION_ENV: &[&str] = &[
+    "CLAUDECODE",
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_CHILD_NOTES_DIR",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_STARTER_MAY_HOLD_CONNECTOR_FILE",
+    "CLAUDE_PID",
+    "CLAUDE_EFFORT",
+];
+
+/// Env edits every spawned child gets: AppImage leaks undone and an outer claude session's markers removed.
 pub fn child_env_overrides() -> Vec<(String, Option<String>)> {
-    let Some(appdir) = env::var_os("APPDIR") else {
-        return Vec::new();
+    let mut out = match env::var_os("APPDIR") {
+        Some(appdir) if !appdir.is_empty() => {
+            overrides_for(&appdir.to_string_lossy(), |key| env::var(key).ok())
+        }
+        _ => Vec::new(),
     };
-    let appdir = appdir.to_string_lossy().into_owned();
-    if appdir.is_empty() {
-        return Vec::new();
-    }
-    overrides_for(&appdir, |key| env::var(key).ok())
+    out.extend(session_markers(|key| env::var_os(key).is_some()));
+    out
+}
+
+fn session_markers(
+    present: impl Fn(&str) -> bool,
+) -> impl Iterator<Item = (String, Option<String>)> {
+    CLAUDE_SESSION_ENV
+        .iter()
+        .filter(move |key| present(key))
+        .map(|key| ((*key).to_string(), None))
 }
 
 fn overrides_for(
@@ -191,6 +217,32 @@ mod tests {
         assert_eq!(out.get("GDK_BACKEND"), Some(&None));
         assert_eq!(out.get("APPDIR"), Some(&None));
         assert_eq!(out.get("APPIMAGE"), Some(&None));
+    }
+
+    #[test]
+    fn removes_an_outer_claude_sessions_markers_but_keeps_user_config() {
+        let env: HashMap<&str, &str> = [
+            ("CLAUDE_CODE_CHILD_SESSION", "1"),
+            ("CLAUDECODE", "1"),
+            ("CLAUDE_CODE_SESSION_ID", "abc"),
+            ("CLAUDE_CODE_USE_BEDROCK", "1"),
+            ("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "8000"),
+        ]
+        .into();
+        let removed: Vec<String> = session_markers(|key| env.contains_key(key))
+            .map(|(key, value)| {
+                assert_eq!(value, None);
+                key
+            })
+            .collect();
+        assert_eq!(
+            removed,
+            [
+                "CLAUDECODE",
+                "CLAUDE_CODE_CHILD_SESSION",
+                "CLAUDE_CODE_SESSION_ID"
+            ]
+        );
     }
 
     #[test]

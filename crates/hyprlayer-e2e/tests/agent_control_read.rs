@@ -42,7 +42,12 @@ type MakeRequest = Box<dyn Fn() -> Request>;
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn agent_control_read() {
-    let sandbox = Sandbox::new();
+    let mut sandbox = Sandbox::new();
+    // As if a claude session's shell started the server.
+    sandbox.set_env("CLAUDE_CODE_CHILD_SESSION", "1");
+    sandbox.set_env("CLAUDECODE", "1");
+    sandbox.set_env("CLAUDE_CODE_ENTRYPOINT", "cli");
+    sandbox.set_env("CLAUDE_CODE_MAX_OUTPUT_TOKENS", "8000");
     sandbox.stage_tool("claude", GOAL_CLAUDE);
     let pty_claude = install(&sandbox, "pty-claude", PTY_CLAUDE);
     let repo = sandbox.fixture_repo("demo", &[("README.md", "# demo\n")]);
@@ -140,6 +145,23 @@ async fn agent_control_read() {
                 .filter(|k| AGENT_ENV.contains(&k.as_str()))
                 .collect(),
         ) }),
+    );
+    let inherited = |env: &[(String, String)]| {
+        json!({
+            "childSession": env_var(env, "CLAUDE_CODE_CHILD_SESSION"),
+            "claudecode": env_var(env, "CLAUDECODE"),
+            "entrypoint": env_var(env, "CLAUDE_CODE_ENTRYPOINT"),
+            "maxOutputTokens": env_var(env, "CLAUDE_CODE_MAX_OUTPUT_TOKENS"),
+        })
+    };
+    let (composer_env, pty_env) = (inherited(&s_env), inherited(&t_env));
+    j.guard(
+        "neither launch inherits the server's claude session markers; user config and the composer's own entrypoint survive",
+        composer_env
+            == json!({ "childSession": "", "claudecode": "", "entrypoint": "hyprlayer-app", "maxOutputTokens": "8000" })
+            && pty_env
+                == json!({ "childSession": "", "claudecode": "", "entrypoint": "", "maxOutputTokens": "8000" }),
+        json!({ "composer": composer_env, "pty": pty_env }),
     );
     let argv: Vec<String> = sandbox
         .read(

@@ -16,7 +16,7 @@ use crate::Sandbox;
 /// `slow-exit` is read at launch, and so is `noinit`, under which the launch reports no init and
 /// answers nothing; `cost` holds cents per turn (40); `tick-plan` holds a plan's path
 /// and, on an optional second line, the turn that ticks every box in it. Launches log to `argv.log`
-/// and `DISPLAY` to `env.log`; the latest launch's `HYPRLAYER_*` goes to `agent-env`. One-shots
+/// and `DISPLAY` to `env.log`; the latest launch's `HYPRLAYER_*` and `CLAUDE*` go to `agent-env`. One-shots
 /// answer from `evaluator` (its prompts append to `evaluator.log`), `validation-summary` and a
 /// fixed recap (its prompts append to `recap.log`);
 /// `hold-summary` holds the summary until `release`, touching `summary-held`. A session opened by
@@ -78,7 +78,7 @@ launch=$(printf '%s' "$argv" | tr '\n' ' ')
 printf '%s\n' "$launch" >> "$base/argv.log"
 printf '%s\n' "$launch" >> "$dir/argv.log"
 printf 'DISPLAY=%s\n' "$DISPLAY" >> "$dir/env.log"
-env | grep '^HYPRLAYER_' > "$dir/agent-env"
+env | grep -E '^(HYPRLAYER_|CLAUDE)' > "$dir/agent-env"
 cents=0; turn=0; cap=""; tripped=""; cbase="$base"
 [ -n "$budget" ] && cap=$(awk -v usd="$budget" 'BEGIN { printf "%d", usd * 100 + 0.5 }')
 trip=',"terminal_reason":"budget_exhausted","errors":["Reached maximum budget"]'

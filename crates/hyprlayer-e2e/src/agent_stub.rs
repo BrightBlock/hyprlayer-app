@@ -87,7 +87,7 @@ dir="$base/${HYPRLAYER_TERMINAL_ID:-session-$sid}"
 mkdir -p "$dir"
 home="$PWD"
 for a in "$@"; do printf '%s\n' "$a"; done > "$dir/argv"
-env | grep '^HYPRLAYER_' > "$dir/env"
+env | grep -E '^(HYPRLAYER_|CLAUDE)' > "$dir/env"
 printf '%s\n' "$$" > "$dir/pid"
 stty size > "$dir/size" 2>/dev/null
 # The exit watcher deletes the launch dir, so keep what it held.

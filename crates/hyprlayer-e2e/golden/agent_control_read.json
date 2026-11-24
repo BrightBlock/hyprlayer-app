@@ -18,6 +18,24 @@
         },
         {
           "evidence": {
+            "composer": {
+              "childSession": "",
+              "claudecode": "",
+              "entrypoint": "hyprlayer-app",
+              "maxOutputTokens": "8000"
+            },
+            "pty": {
+              "childSession": "",
+              "claudecode": "",
+              "entrypoint": "",
+              "maxOutputTokens": "8000"
+            }
+          },
+          "guard": "neither launch inherits the server's claude session markers; user config and the composer's own entrypoint survive",
+          "ok": true
+        },
+        {
+          "evidence": {
             "hyprlayerRules": [
               "git_status",
               "list_agents",
