@@ -49,6 +49,21 @@ Use a non-git folder. A git import runs `thoughts init`, which writes the shared
 
 Teardown is `cleanup` (below).
 
+### Keep the window off the user's screen (Hyprland)
+
+Each build reports its own window class: release `Hyprlayer`, the dev install `Hyprlayer-Dev`, and every debug build, this skill's included, `Hyprlayer-Debug`. <!-- src: src-tauri/src/window_class.rs:4 --> So one named class rule routes the verify window away from the user's workspaces without touching their windows. Hyprland's config here is Lua: `hyprctl keyword` is refused, so rules go through `hyprctl eval`. The agent shell may lack `HYPRLAND_INSTANCE_SIGNATURE` (take it from `ls $XDG_RUNTIME_DIR/hypr/`) and `WAYLAND_DISPLAY`/`DISPLAY` (copy them from a user terminal's `/proc/<pid>/environ`).
+
+1. Snapshot the clients and the focus: `hyprctl clients -j | jq -S '[.[] | {address, pid, class, workspace: .workspace.name}] | sort_by(.address)' > before.json` and `hyprctl activeworkspace -j > aw-before.json`.
+2. Add the rule before launch. Name it, so it can be turned off later:
+   ```bash
+   hyprctl eval 'hl.window_rule({ name = "hlverify", match = { class = "^Hyprlayer-Debug$" }, workspace = "name:hlverify silent", no_initial_focus = true })'
+   ```
+3. Prove the rule matches before you launch: `foot --app-id=Hyprlayer-Debug sleep 30 &`, check that `hyprctl clients -j` shows it on `hlverify` and that the active workspace did not change, then kill it.
+4. Launch. Check that `hyprctl clients -j` shows the app's pid with class `Hyprlayer-Debug` on `hlverify`.
+5. After `cleanup`, run `hyprctl eval 'hl.window_rule({ name = "hlverify", enabled = false })'`, then diff the snapshot again. Nothing may change.
+
+Don't create a headless output when `hyprctl monitors` lists only `FALLBACK`, as a session with no display does. Hyprland moves FALLBACK's workspaces onto the new output, and Omarchy's `monitor-workspaces.lua` renumbers them into that output's block on `monitor.added`. The user's terminal went from workspace 1 to 52, and removing the output did not bring it back. Omarchy also records every new output in `~/.local/state/omarchy/monitor-workspaces`. A workspace rule has no name and can't be removed, so one that binds a workspace to an output stays for the rest of the session. A window on a workspace no one is viewing can stall `requestAnimationFrame` (see Gotchas), so drive a screenshot-heavy recipe only where the user isn't watching, or ask first.
+
 ## Doctor
 
 ```bash

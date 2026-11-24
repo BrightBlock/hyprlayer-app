@@ -15,6 +15,8 @@ pub mod supervisor;
 mod traffic_lights;
 mod webkit_env;
 mod webview_gestures;
+#[cfg(target_os = "linux")]
+mod window_class;
 mod window_geometry;
 
 use std::collections::BTreeMap;
@@ -456,6 +458,8 @@ pub fn run() {
     // Bound before the builder so the identifier is readable: the profile id
     // has to be injected into the webview before any script runs.
     let context = tauri::generate_context!();
+    #[cfg(target_os = "linux")]
+    window_class::apply(&context.config().identifier);
     let profile = dirs::config_dir()
         .map(|d| d.join(&context.config().identifier))
         .map(|dir| hosts::profile_id(&dir))
