@@ -58,7 +58,7 @@ pub fn read(path: &Path) -> Result<SkillLock> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(SkillLock::default()),
         Err(e) => return Err(e.into()),
     };
-    let lock: SkillLock = serde_json::from_str(&text)
+    let mut lock: SkillLock = serde_json::from_str(&text)
         .map_err(|e| invalid(path, format!("is not a valid lock: {e}")))?;
     if lock.version > VERSION {
         return Err(invalid(
@@ -66,6 +66,16 @@ pub fn read(path: &Path) -> Result<SkillLock> {
             format!("is version {}, newer than this app supports", lock.version),
         ));
     }
+    lock.skills.retain(|folder, _| {
+        let valid = crate::skills::is_valid_skill_name(folder);
+        if !valid {
+            tracing::warn!(
+                "{} lists an invalid skill folder {folder:?}; ignoring it",
+                path.display()
+            );
+        }
+        valid
+    });
     Ok(lock)
 }
 

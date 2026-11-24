@@ -491,3 +491,119 @@ async fn delete_files_true_deletes_a_cloned_projects_directory() {
 
     runtime.shutdown().await;
 }
+
+fn git_in(dir: &Path, args: &[&str]) -> String {
+    let out = std::process::Command::new("git")
+        .arg("-C")
+        .arg(dir)
+        .args([
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "commit.gpgsign=false",
+        ])
+        .args(args)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
+}
+
+#[tokio::test]
+async fn restore_ignores_a_cloned_lock_key_that_escapes_the_store() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let ssh = home.join(".ssh");
+    std::fs::create_dir_all(&ssh).unwrap();
+    std::fs::write(ssh.join("id_ed25519"), "PRIVATE KEY\n").unwrap();
+
+    let base = root.path().join("gitbase");
+    let src = base.join("evil/skill");
+    std::fs::create_dir_all(&src).unwrap();
+    std::fs::write(
+        src.join("SKILL.md"),
+        "---\nname: evil\ndescription: x\n---\nbody\n",
+    )
+    .unwrap();
+    git_in(&src, &["init", "-q", "-b", "main"]);
+    git_in(&src, &["add", "."]);
+    git_in(&src, &["commit", "-qm", "x"]);
+    let head = git_in(&src, &["rev-parse", "HEAD"]);
+    let hashed = root.path().join("hashed");
+    std::fs::create_dir_all(&hashed).unwrap();
+    std::fs::copy(src.join("SKILL.md"), hashed.join("SKILL.md")).unwrap();
+    let hash = hyprlayer_core::skill_sources::content_hash(&hashed).unwrap();
+
+    let checkout = home.join("proj");
+    std::fs::create_dir_all(checkout.join(".agents/hyprlayer")).unwrap();
+    let lock = serde_json::json!({
+        "skills": { "../../../../.ssh": {
+            "commit": head, "hash": hash, "path": "", "ref": "main",
+            "repo": "evil/skill", "source": "github", "targets": []
+        }},
+        "version": 1
+    });
+    std::fs::write(
+        checkout.join(".agents/hyprlayer/skills.lock"),
+        serde_json::to_string(&lock).unwrap(),
+    )
+    .unwrap();
+
+    let mut env = test_environment(&home);
+    env.process_env.insert(
+        OsString::from("HYPRLAYER_SKILLS_GIT_BASE"),
+        OsString::from(format!("file://{}", base.display())),
+    );
+    let runtime = RuntimeBuilder::new(env, test_paths(root.path()))
+        .open()
+        .await
+        .unwrap();
+    let report = runtime
+        .skills()
+        .restore(
+            Some(checkout.display().to_string()),
+            hyprlayer_models::SkillScope::Project,
+        )
+        .await
+        .unwrap();
+
+    assert!(report.entries.is_empty(), "{report:?}");
+    assert!(ssh.join("id_ed25519").exists());
+    runtime.shutdown().await;
+}
+
+#[tokio::test]
+async fn remove_refuses_a_skill_name_that_escapes_the_store() {
+    let root = tempfile::tempdir().unwrap();
+    let home = root.path().join("home");
+    let victim = home.join("Documents");
+    std::fs::create_dir_all(&victim).unwrap();
+    let checkout = home.join("proj");
+    std::fs::create_dir_all(checkout.join(".agents/hyprlayer/skills/installed")).unwrap();
+    let runtime = RuntimeBuilder::new(test_environment(&home), test_paths(root.path()))
+        .open()
+        .await
+        .unwrap();
+
+    let result = runtime
+        .skills()
+        .remove(
+            Some(checkout.display().to_string()),
+            hyprlayer_models::SkillScope::Project,
+            "../../../../Documents".into(),
+        )
+        .await;
+
+    assert!(
+        matches!(result, Err(CoreError::SkillNotInstalled { .. })),
+        "{result:?}"
+    );
+    assert!(victim.exists());
+    runtime.shutdown().await;
+}

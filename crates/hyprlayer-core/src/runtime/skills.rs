@@ -710,6 +710,9 @@ impl SkillService<'_> {
         name: String,
     ) -> Result<()> {
         ensure_running(self.runtime)?;
+        if !crate::skills::is_valid_skill_name(&name) {
+            return Err(CoreError::SkillNotInstalled { name });
+        }
         let checkout = project_checkout(project_path)?;
         let layout = self.layout(scope, checkout.as_deref())?;
         let key = self.scope_lock_key(scope, checkout.as_deref())?;
