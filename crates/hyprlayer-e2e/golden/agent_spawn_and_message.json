@@ -692,6 +692,22 @@
       "guards": [
         {
           "evidence": {
+            "leadGone": true,
+            "modes": [
+              "bypassPermissions",
+              "default"
+            ]
+          },
+          "guard": "started in bypass, it resumes in default once the setting is lowered",
+          "ok": true
+        }
+      ],
+      "step": "a Lead resumes no higher than the Lead permission setting"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "exit": 0,
             "listening": false
           },

@@ -169,7 +169,11 @@ impl AgentControlService<'_> {
                 if !sessions.is_live(&id).await {
                     sessions
                         .launch(LaunchSessionParams {
-                            permission_mode: session.requested_permission_mode.or(Some(mode)),
+                            permission_mode: Some(
+                                session
+                                    .requested_permission_mode
+                                    .map_or(mode, |chosen| super::spawn::lower(chosen, mode)),
+                            ),
                             session,
                             project_path: main.project_path,
                             model: None,

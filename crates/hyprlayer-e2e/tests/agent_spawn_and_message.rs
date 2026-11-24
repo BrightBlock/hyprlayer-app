@@ -1368,6 +1368,54 @@ async fn agent_spawn_and_message() {
     drop(inner_mcp);
     drop(limited_mcp);
 
+    j.step("a Lead resumes no higher than the Lead permission setting");
+    let set_lead_mode = |mode: PermissionMode| {
+        move |s: &mut hyprlayer_core::settings::AppSettings| {
+            let mut lead = s.agent_control.lead();
+            lead.permission_mode = hyprlayer_core::settings::LeadPermissionMode(Some(mode));
+            s.agent_control.lead = Some(lead);
+        }
+    };
+    update_settings(&mut j, &c, set_lead_mode(PermissionMode::BypassPermissions)).await;
+    let the_lead = c
+        .message_lead(project.clone(), "E2E_LEAD_ONE".into())
+        .await
+        .expect("message_lead");
+    j.alias(&the_lead, "$THE_LEAD");
+    let argv_log = sandbox
+        .root
+        .join("goal-control")
+        .join(&the_lead)
+        .join("argv.log");
+    let launches = || {
+        std::fs::read_to_string(&argv_log)
+            .unwrap_or_default()
+            .lines()
+            .map(|line| {
+                line.split_whitespace()
+                    .skip_while(|w| *w != "--permission-mode")
+                    .nth(1)
+                    .unwrap_or("none")
+                    .to_string()
+            })
+            .collect::<Vec<_>>()
+    };
+    eventually(IO, || launches().len() == 1).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    let _ = c.kill_session(the_lead.clone()).await;
+    let lead_gone = gone(&c, &the_lead).await;
+    update_settings(&mut j, &c, set_lead_mode(PermissionMode::Default)).await;
+    c.message_lead(project.clone(), "E2E_LEAD_TWO".into())
+        .await
+        .expect("message_lead");
+    eventually(IO, || launches().len() == 2).await;
+    let modes = launches();
+    j.guard(
+        "started in bypass, it resumes in default once the setting is lowered",
+        lead_gone && modes == ["bypassPermissions", "default"],
+        json!({ "leadGone": lead_gone, "modes": modes }),
+    );
+
     j.step("shutdown");
     let stopped = server.shutdown(&c).await;
     j.guard(
