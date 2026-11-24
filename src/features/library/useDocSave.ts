@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useBlocker } from "@tanstack/react-router";
 
-import type { DocContent, FrontmatterEditDto } from "@/lib/bindings";
+import type { DocContent, DocMeta, FrontmatterEditDto } from "@/lib/bindings";
 import { isAppError } from "@/lib/ipc";
 import { fetchDocFresh, useSaveDocParts } from "@/lib/queries";
 import { setField as setDraftField, toPatch, type FmDraft, type SchemaKey } from "./fmDraft";
@@ -74,15 +74,18 @@ export function useDocSave(id: string, doc: DocContent) {
     const sent = body === base.body ? base.rawBody : body; // untouched body goes back byte-for-byte
     const frontmatter: FrontmatterEditDto =
       raw !== null ? { kind: "raw", text: raw } : { kind: "patch", patch: toPatch(draft) };
+    const sentDraft = draft;
+    const sentRaw = raw;
+    let saved: DocMeta;
     try {
-      await saveParts.mutateAsync({ body: sent, frontmatter, baseMtimeMs: base.mtimeMs });
+      saved = await saveParts.mutateAsync({ body: sent, frontmatter, baseMtimeMs: base.mtimeMs });
     } catch {
       return false;
     }
-    const fresh = await fetchDocFresh(id);
-    setBase(baseOf(fresh));
-    setDraft({});
-    setRaw(null);
+    const fresh = await fetchDocFresh(id).catch(() => null);
+    setBase(fresh ? baseOf(fresh) : { body: lf(sent), rawBody: sent, mtimeMs: saved.mtimeMs ?? 0 });
+    setDraft((d) => (d === sentDraft ? {} : d));
+    setRaw((r) => (r === sentRaw ? null : r));
     flashSaved();
     return true;
   }

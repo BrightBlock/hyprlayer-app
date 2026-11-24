@@ -177,4 +177,21 @@ describe("PathField", () => {
     const up = await screen.findByRole("button", { name: "Up one folder" });
     expect((up as HTMLButtonElement).disabled).toBe(true);
   });
+
+  it("does not choose the previous folder when the typed one fails to list", async () => {
+    const { onChange } = setup(NEXUS);
+    m.browseDirectory.mockImplementation(async (dir: string | null) =>
+      dir === null || dir === "/srv"
+        ? { status: "ok", data: listing("/srv", null, ["work"]) }
+        : { status: "error", error: { code: "not_found", message: "No such directory", remedy: null } },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Browse" }));
+    await screen.findByText("work");
+    fireEvent.change(pathInput(), { target: { value: "/srv/missing/" } });
+    await screen.findByText("No such directory");
+    const choose = screen.getByRole("button", { name: "Choose this folder" }) as HTMLButtonElement;
+    if (!choose.disabled) fireEvent.click(choose);
+    await waitFor(() => expect(m.browseDirectory).toHaveBeenCalledWith("/srv/missing"));
+    expect(onChange).not.toHaveBeenCalledWith("/srv");
+  });
 });

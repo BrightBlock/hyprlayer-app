@@ -111,7 +111,8 @@ function ServerPicker({
   onPick: (path: string) => void;
 }) {
   const [value, setValue] = useState(start ?? "");
-  const [listing, setListing] = useState<DirListing | null>(null);
+  const [listed, setListed] = useState<{ dir: string | null; listing: DirListing } | null>(null);
+  const listing = listed?.listing ?? null;
   const [error, setError] = useState<unknown>(null);
   const showDotFiles = useUiStore((s) => s.showDotFiles);
   const setShowDotFiles = useUiStore((s) => s.setShowDotFiles);
@@ -128,7 +129,7 @@ function ServerPicker({
     unwrap(commands.browseDirectory(dir))
       .then((next) => {
         if (!live) return;
-        setListing(next);
+        setListed({ dir, listing: next });
         setError(null);
         // First open: adopt the server's home so the field shows where we are.
         setValue((current) => (current === "" ? next.path + sepOf(next.path) : current));
@@ -158,7 +159,8 @@ function ServerPicker({
   // A typed segment that names a real directory IS the choice — otherwise
   // typing a full path and pressing Choose would hand back its parent.
   const exact = segment ? matches.find((e) => e.isDir && e.name === segment) : undefined;
-  const chosen = exact ? exact.path : (listing?.path ?? null);
+  const current = !error && (listed?.dir === dir || listing?.path === dir);
+  const chosen = !current ? null : exact ? exact.path : (listing?.path ?? null);
 
   const descend = (entry: { path: string }) => setValue(entry.path + sepOf(entry.path));
 
