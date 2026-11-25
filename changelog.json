@@ -1,6 +1,21 @@
 {
   "versions": [
     {
+      "version": "0.9.0",
+      "date": "2026-11-25",
+      "summary": "Meet the Lead Engineer, an agent per project that queues, runs and lands work.",
+      "notes": [
+        "The Lead Engineer is one agent per project, on its main checkout. It starts workstreams, checks their work and lands their PRs inside the guardrails you set. Turn it on in Settings > Agent control > Lead Engineer, then open it from the project header row or with Mod+Shift+E (⌘⇧E on macOS).",
+        "The Lead panel shows its queue, the workstreams it is running, and meters for the host's load, memory and swap. Drag a queued item, or move it with the keyboard, to change what runs next. The panel resizes and collapses.",
+        "A guided tour introduces the Lead Engineer and walks you through one read-only task. After an update, a What's new card lists only what changed since the last version you saw. Help in quick settings starts the tour again or reopens What's new.",
+        "Hyprlayer runs OpenCode 2.4 or later and drops support for OpenCode 1.x. Install it with `npm install -g @opencode/cli`. Settings > OpenCode can sign you in to providers that offer OAuth, such as ChatGPT, xAI and OpenCode's own account, as well as take an API key.",
+        "Chat and terminal agents that a server restart cut off pick up where they left off.",
+        "Turn on \"Show server stats in status bar\" in quick settings to see the server's CPU, memory, swap and load on the Server button.",
+        "Hyprlayer renders only the newest messages of a long chat until you scroll back, so long chats open and scroll faster.",
+        "This version works with hyprlayer-server 0.9.0 and later."
+      ]
+    },
+    {
       "version": "0.8.24",
       "date": "2026-11-17",
       "summary": "Agents can now spawn, message and drive other agents and terminals in Hyprlayer.",
