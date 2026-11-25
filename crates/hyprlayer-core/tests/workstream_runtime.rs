@@ -529,6 +529,66 @@ async fn archive_releases_its_own_worktree_watch_and_no_other() {
     f.runtime.shutdown().await;
 }
 
+// Windows refuses the move while the terminal's shell, or anything it started, has the worktree open.
+#[tokio::test]
+async fn archive_moves_a_worktree_a_terminal_is_still_running_in() {
+    use base64::Engine;
+    use hyprlayer_core::runtime::terminals::{OpenTerminalRequest, WriteTerminalRequest};
+
+    let (f, repo) = fixture(Some(0)).await;
+    let created = f
+        .runtime
+        .workstreams()
+        .create(isolated_request(&repo, "Busy"))
+        .await
+        .unwrap();
+    let id = created.item.id.clone();
+    f.runtime
+        .workstreams()
+        .watch(HashSet::from([id.clone()]))
+        .await
+        .unwrap();
+    let terminal = f
+        .runtime
+        .terminals()
+        .open(OpenTerminalRequest {
+            workstream_id: id.clone(),
+            cols: 80,
+            rows: 24,
+        })
+        .await
+        .unwrap();
+    let command = if cfg!(windows) {
+        "ping -n 600 127.0.0.1\r"
+    } else {
+        "sleep 600\r"
+    };
+    f.runtime
+        .terminals()
+        .write(WriteTerminalRequest {
+            terminal_id: terminal.terminal_id,
+            data: base64::engine::general_purpose::STANDARD.encode(command),
+            viewer: None,
+        })
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    let worktree = PathBuf::from(&created.item.worktree_path);
+    f.runtime
+        .workstreams()
+        .archive(ArchiveWorkstreamRequest {
+            id,
+            skip_scripts: true,
+        })
+        .await
+        .unwrap();
+    assert!(!worktree.exists(), "the worktree must have moved");
+    assert!(archive_dir_for(&repo, &created.item.slug).is_dir());
+
+    f.runtime.shutdown().await;
+}
+
 #[tokio::test]
 async fn failed_archive_move_keeps_the_worktree_watched() {
     let (f, repo) = fixture(Some(0)).await;
