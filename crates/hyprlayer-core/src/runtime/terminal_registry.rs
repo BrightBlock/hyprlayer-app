@@ -99,18 +99,19 @@ impl TerminalRegistry {
         Some(count)
     }
 
-    pub async fn remove_for_workstream(&self, ws: &str) {
+    /// Kills them and returns the sessions, for a caller that must wait for them to let go.
+    pub async fn remove_for_workstream(&self, ws: &str) -> Vec<Arc<PtySession>> {
         let mut g = self.live.lock().await;
         let ids: Vec<String> = g
             .iter()
             .filter(|(_, s)| s.workstream_id == ws)
             .map(|(k, _)| k.clone())
             .collect();
-        for id in ids {
-            if let Some(s) = g.remove(&id) {
-                s.kill();
-            }
+        let removed: Vec<_> = ids.iter().filter_map(|id| g.remove(id)).collect();
+        for s in &removed {
+            s.kill();
         }
+        removed
     }
 }
 

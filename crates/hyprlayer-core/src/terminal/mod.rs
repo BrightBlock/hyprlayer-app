@@ -572,6 +572,8 @@ pub struct PtySession {
     sizing: Arc<Sizing>,
     #[cfg(unix)]
     pid: Option<u32>,
+    #[cfg(windows)]
+    job: Option<crate::process::job::JobObject>,
     killed: Arc<AtomicBool>,
     pub workstream_id: String,
 }
@@ -607,6 +609,8 @@ impl PtySession {
         let killer = child.clone_killer();
         #[cfg(unix)]
         let pid = child.process_id();
+        #[cfg(windows)]
+        let job = adopt_into_job(&*child);
 
         let reader = pair.master.try_clone_reader().map_err(to_io)?;
         let writer: PtyWriter = Arc::new(StdMutex::new(pair.master.take_writer().map_err(to_io)?));
@@ -638,6 +642,8 @@ impl PtySession {
             }),
             #[cfg(unix)]
             pid,
+            #[cfg(windows)]
+            job,
             killed: killed.clone(),
             workstream_id: cfg.workstream_id,
         });
@@ -806,8 +812,37 @@ impl PtySession {
                 unsafe { libc::killpg(pgid, libc::SIGKILL) };
             }
         }
+        #[cfg(windows)]
+        if let Some(job) = &self.job {
+            job.terminate();
+        }
         let _ = self.killer.lock().unwrap().kill();
     }
+
+    /// Whether every process the terminal started has exited, so none holds its cwd open.
+    pub fn released(&self) -> bool {
+        #[cfg(windows)]
+        if let Some(job) = &self.job {
+            return job.is_empty();
+        }
+        self.sizing.ring.inner.lock().unwrap().exited.is_some()
+    }
+}
+
+#[cfg(windows)]
+fn adopt_into_job(
+    child: &(dyn portable_pty::Child + Send + Sync),
+) -> Option<crate::process::job::JobObject> {
+    let job = crate::process::job::JobObject::kill_on_close_allowing_breakaway().and_then(|job| {
+        let process = child
+            .as_raw_handle()
+            .ok_or_else(|| std::io::Error::other("no process handle"))?;
+        job.adopt_raw(process as _).map(|()| job)
+    });
+    job.inspect_err(|e| {
+        tracing::warn!("terminal outside a job, so a kill ends only its shell: {e}")
+    })
+    .ok()
 }
 
 /// A queued chunk, waiting only while a burst is held: an echo never sits in a timed wait.

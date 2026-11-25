@@ -13,6 +13,12 @@ use crate::process::Exec;
 
 use super::thoughts_links::LinkStatus;
 
+const MOVE_RETRY_BACKOFFS: [Duration; 3] = [
+    Duration::from_millis(500),
+    Duration::from_secs(1),
+    Duration::from_secs(2),
+];
+
 /// Empty overlay, for tests that don't care about it.
 #[cfg(test)]
 const NO_OVERLAY: &[(String, String)] = &[];
@@ -573,16 +579,28 @@ async fn move_worktree(
     let parent = to.parent().unwrap_or(to);
     if same_filesystem(from, parent)? {
         let (from, to) = (from.display().to_string(), to.display().to_string());
-        git_in(
-            git,
-            project_repo,
-            &["worktree", "move", &from, &to],
-            overlay,
-        )
-        .timeout(Duration::from_secs(120))
-        .run()
-        .await?;
-        return Ok(());
+        let mut backoffs = MOVE_RETRY_BACKOFFS.iter();
+        loop {
+            let moved = git_in(
+                git,
+                project_repo,
+                &["worktree", "move", &from, &to],
+                overlay,
+            )
+            .timeout(Duration::from_secs(120))
+            .run()
+            .await;
+            match (moved, backoffs.next()) {
+                // An indexer or virus scanner may hold a file in the tree open for a moment.
+                (Err(e), Some(wait))
+                    if cfg!(windows) && e.to_string().contains("Permission denied") =>
+                {
+                    tracing::warn!("worktree move refused, retrying in {wait:?}: {e}");
+                    tokio::time::sleep(*wait).await;
+                }
+                (moved, _) => return moved.map(drop),
+            }
+        }
     }
     std::fs::create_dir(to).map_err(|e| io_at("create the destination", to, e))?;
     let copied = match copy_worktree(from, to) {

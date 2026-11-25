@@ -295,6 +295,7 @@ const PR_LOOKUPS_AT_ONCE: usize = 4;
 const FETCHES_AT_ONCE: usize = 2;
 const FETCH_BACKOFF: Duration = Duration::from_secs(30 * 60);
 const REFOCUS_FETCH_GAP: Duration = Duration::from_secs(30);
+const TERMINAL_EXIT_WAIT: Duration = Duration::from_secs(5);
 
 #[derive(Default)]
 pub(crate) struct FetchHistory {
@@ -1979,7 +1980,20 @@ impl WorkstreamService<'_> {
         // Windows refuses to move a directory a watcher holds open. Holding the lock through
         // the move stops `watch` re-arming; the UI itself only re-arms on navigation.
         let mut watch = self.runtime.watchers.worktree_watch.lock().await;
-        let disarmed = watch.get_mut(&id).and_then(Option::take).is_some();
+        let disarmed = match watch.get_mut(&id).and_then(Option::take) {
+            Some(handle) => {
+                if let Err(e) = blocking(move || {
+                    handle.release();
+                    Ok(())
+                })
+                .await
+                {
+                    tracing::warn!("worktree watch on {id} was dropped unconfirmed: {e}");
+                }
+                true
+            }
+            None => false,
+        };
         let moved = match self
             .runtime
             .worktrees
@@ -2116,11 +2130,18 @@ impl WorkstreamService<'_> {
                 .end_quietly_and_await_exit(&session.id)
                 .await;
         }
-        self.runtime.terminals.remove_for_workstream(id).await;
+        let mut killed = self.runtime.terminals.remove_for_workstream(id).await;
         for agent in self.runtime.pty_agents.list(Some(id)) {
             self.runtime.pty_agents.release(&agent.terminal_id);
         }
-        self.runtime.scripts.clear_workstream(id).await;
+        killed.extend(self.runtime.scripts.clear_workstream(id).await);
+        // A process still running in the worktree makes Windows refuse the archive's move.
+        let released = || killed.iter().all(|s| s.released());
+        if !crate::process::wait_until(released, TERMINAL_EXIT_WAIT).await {
+            tracing::warn!(
+                "archive of {id}: a terminal's processes outlived {TERMINAL_EXIT_WAIT:?}"
+            );
+        }
 
         // After the kills: no agent of this workstream can write a doc past this point.
         let (pr_ref, pr) = self

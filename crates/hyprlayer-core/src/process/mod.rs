@@ -2,7 +2,7 @@ pub mod appimage;
 pub mod binaries;
 pub mod exit;
 #[cfg(windows)]
-mod job;
+pub(crate) mod job;
 pub mod orphan;
 
 use std::collections::VecDeque;
@@ -486,10 +486,25 @@ async fn read_chunk<R: AsyncRead + Unpin>(
     }
 }
 
+#[cfg(windows)]
+const TREE_EXIT_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Polls `done` until it holds or `limit` passes; true if it held.
+pub async fn wait_until(mut done: impl FnMut() -> bool, limit: std::time::Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + limit;
+    while !done() {
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    true
+}
+
 pub struct SupervisedChild {
     child: tokio::process::Child,
     #[cfg(windows)]
-    _job: Option<job::JobObject>,
+    job: Option<job::JobObject>,
 }
 
 impl SupervisedChild {
@@ -513,8 +528,18 @@ impl SupervisedChild {
         self.child.try_wait()
     }
 
+    /// On Windows, also ends the child's tree and waits for it, so an exit means nothing it
+    /// started still holds files open.
     pub async fn wait(&mut self) -> std::io::Result<std::process::ExitStatus> {
-        self.child.wait().await
+        let status = self.child.wait().await?;
+        #[cfg(windows)]
+        if let Some(job) = &self.job {
+            job.terminate();
+            if !wait_until(|| job.is_empty(), TREE_EXIT_WAIT).await {
+                tracing::warn!("a child's process tree outlived {TREE_EXIT_WAIT:?}");
+            }
+        }
+        Ok(status)
     }
 
     pub fn kill_blocking(&self) {
@@ -577,7 +602,7 @@ pub fn spawn_supervised(cmd: &mut tokio::process::Command) -> std::io::Result<Su
                 tracing::warn!("could not join child to job, tree may outlive us: {e}");
             }
         }
-        Ok(SupervisedChild { child, _job: job })
+        Ok(SupervisedChild { child, job })
     }
 
     #[cfg(not(windows))]
