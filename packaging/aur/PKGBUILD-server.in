@@ -16,7 +16,7 @@ provides=('hyprlayer-server')
 conflicts=('hyprlayer-server')
 options=('!strip' '!debug')
 _bin="hyprlayer-server-x86_64-unknown-linux-gnu"
-source=("${_bin}-${pkgver}::https://github.com/BrightBlock/hyprlayer-releases/releases/download/server-v${pkgver}/${_bin}"
+source=("${_bin}-${pkgver}::https://github.com/BrightBlock/hyprlayer-app/releases/download/server-v${pkgver}/${_bin}"
         "hyprlayer-server.service")
 sha256sums=('@SHA256_SERVER@'
             '@SHA256_UNIT@')

@@ -4,10 +4,10 @@ Hyprlayer ships in-app, signed self-updates via the Tauri updater plugin.
 Binaries are published to **GitHub Releases**; a tiny signed manifest lives on
 **brightblock.ai**, which running apps poll to discover and install updates.
 
-The source repo stays **private**. Because a private repo's release assets
-can't be downloaded anonymously (and the updater fetches them unauthenticated),
-binaries are published to a **separate public repo**, `BrightBlock/hyprlayer-releases`,
-which holds releases only — no source.
+Releases are published on the public source repo, `BrightBlock/hyprlayer-app`,
+so the updater can download their assets without authenticating. Releases up to
+v0.9.0 also live on `BrightBlock/hyprlayer-releases`, which installed builds
+before that version still use to provision remote servers.
 
 ## How it fits together
 
@@ -18,8 +18,7 @@ containers on the same Mac and signs their output locally, so the ed25519
 signing key never leaves it.
 
 ```
-private: BrightBlock/hyprlayer-app  (source)
-public:  BrightBlock/hyprlayer-releases  (binaries only)
+public:  BrightBlock/hyprlayer-app  (source + releases)
 public:  brightblock.ai  (manifest JSON, served by Vercel)
 public:  aur.archlinux.org/hyprlayer-desktop-bin  (PKGBUILD only)
 
@@ -33,14 +32,14 @@ public:  aur.archlinux.org/hyprlayer-desktop-bin  (PKGBUILD only)
   ├─ linux  (container) → Hyprlayer_<v>_amd64.deb + Hyprlayer-<v>-1.x86_64.rpm
   │                       + a rendered PKGBUILD/.SRCINFO (no signature — see below)
   ├─ --smoke (optional) → install-tests both before publishing (see "Smoke tests")
-  ├─ release      → GitHub Release on hyprlayer-releases (public) w/ assets
+  ├─ release      → GitHub Release on hyprlayer-app (public) w/ assets
   ├─ manifest     → latest.json + changelog.json → jtsiros/hyprlayer.dev
   │                 (darwin-aarch64 + windows-x86_64) → Vercel
   ├─ cask         → BrightBlock/homebrew-tap version + dmg sha256 bump
   └─ aur          → hyprlayer-desktop-bin PKGBUILD + .SRCINFO
         ▼
 Running apps  check() → https://brightblock.ai/hyprlayer/updates/latest.json
-                        → asset URLs on hyprlayer-releases (public)
+                        → asset URLs on hyprlayer-app (public)
               downloadAndInstall() → relaunch()
 ```
 
@@ -112,19 +111,12 @@ git push && git push --tags
 
 ## One-time setup (required before the first release)
 
-### 0. Create the public releases repo
-
-Create `BrightBlock/hyprlayer-releases` as a **public** repo with a single
-initial commit on `main` (a README explaining it holds Hyprlayer binaries is
-enough). CI publishes every Release here; it never pushes source.
-
 ### 1. Repository secrets — `BrightBlock/hyprlayer-app`
 
 | Secret | Value |
 | --- | --- |
 | `TAURI_SIGNING_PRIVATE_KEY` | Contents of the ed25519 private key (`~/.tauri/hyprlayer_updater.key`). |
 | `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` | The key's password — empty here, so set it to an empty string (or omit). |
-| `RELEASES_REPO_TOKEN` | A PAT with `contents:write` on `BrightBlock/hyprlayer-releases`, so the release job can create the public Release across repos (the built-in `GITHUB_TOKEN` can't write to another repo). |
 | `WEBSITE_REPO_TOKEN` | A PAT with `contents:write` on `jtsiros/brightblock.ai` (it's private), so `bump-website` can push the manifest. |
 
 The signing keypair was generated with `pnpm tauri signer generate`. **Back up

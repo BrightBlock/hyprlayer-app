@@ -3,7 +3,7 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-RELEASES_REPO="BrightBlock/hyprlayer-releases"
+RELEASES_REPO="BrightBlock/hyprlayer-app"
 TAP_REPO="BrightBlock/homebrew-tap"
 WEBSITE_REPO="jtsiros/hyprlayer.dev"
 WEBSITE_MANIFEST_PATH="public/updates/latest.json"

@@ -17,7 +17,7 @@ use crate::server_version::{self, SERVER_VERSION};
 use crate::ssh::Ssh;
 use crate::supervisor;
 
-const RELEASE_BASE: &str = "https://github.com/BrightBlock/hyprlayer-releases/releases/download";
+const RELEASE_BASE: &str = "https://github.com/BrightBlock/hyprlayer-app/releases/download";
 const SUMS_ASSET: &str = "hyprlayer-server-sha256sums.txt";
 const CONNECT_TIMEOUT: &str = "20";
 const DOWNLOAD_TIMEOUT: &str = "600";

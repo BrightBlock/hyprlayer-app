@@ -13,7 +13,7 @@
   <a href="https://hyprlayer.dev">Website</a> ·
   <a href="https://hyprlayer.dev/desktop/install">Install</a> ·
   <a href="https://hyprlayer.dev/cli/getting-started/installation">Docs</a> ·
-  <a href="https://github.com/BrightBlock/hyprlayer-releases/releases">Changelog</a>
+  <a href="https://github.com/BrightBlock/hyprlayer-app/releases">Changelog</a>
 </p>
 
 ![A Claude Code orchestrator in Hyprlayer reporting on the two workstreams it handed to a Claude Code worker and a Codex worker](docs/assets/hero.png)
@@ -22,7 +22,7 @@
 
 It's free and uses the Claude Code, Codex, and OpenCode logins you already have.
 Every build is on the
-[latest release](https://github.com/BrightBlock/hyprlayer-releases/releases/latest).
+[latest release](https://github.com/BrightBlock/hyprlayer-app/releases/latest).
 
 ### macOS (Apple Silicon)
 

@@ -16,7 +16,7 @@ provides=('hyprlayer-desktop' 'hyprlayer-server')
 conflicts=('hyprlayer-desktop' 'hyprlayer-server')
 options=('!strip' '!debug' '!emptydirs')
 _deb="Hyprlayer_${pkgver}_amd64.deb"
-source=("${_deb}::https://github.com/BrightBlock/hyprlayer-releases/releases/download/v${pkgver}/${_deb}"
+source=("${_deb}::https://github.com/BrightBlock/hyprlayer-app/releases/download/v${pkgver}/${_deb}"
         "hyprlayer-server.service")
 sha256sums=('@SHA256@'
             '@SHA256_UNIT@')

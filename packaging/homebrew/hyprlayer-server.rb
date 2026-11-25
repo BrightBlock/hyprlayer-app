@@ -13,14 +13,14 @@ class HyprlayerServer < Formula
 
   on_macos do
     on_arm do
-      url "https://github.com/BrightBlock/hyprlayer-releases/releases/download/server-v#{version}/hyprlayer-server-aarch64-apple-darwin"
+      url "https://github.com/BrightBlock/hyprlayer-app/releases/download/server-v#{version}/hyprlayer-server-aarch64-apple-darwin"
       sha256 "@SHA256_MACOS_ARM64@"
     end
   end
 
   on_linux do
     on_intel do
-      url "https://github.com/BrightBlock/hyprlayer-releases/releases/download/server-v#{version}/hyprlayer-server-x86_64-unknown-linux-gnu"
+      url "https://github.com/BrightBlock/hyprlayer-app/releases/download/server-v#{version}/hyprlayer-server-x86_64-unknown-linux-gnu"
       sha256 "@SHA256_LINUX_X86_64@"
     end
   end
