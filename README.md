@@ -13,7 +13,8 @@
   <a href="https://hyprlayer.dev">Website</a> ·
   <a href="https://hyprlayer.dev/desktop/install">Install</a> ·
   <a href="https://hyprlayer.dev/cli/getting-started/installation">Docs</a> ·
-  <a href="https://github.com/BrightBlock/hyprlayer-app/releases">Changelog</a>
+  <a href="https://github.com/BrightBlock/hyprlayer-app/releases">Changelog</a> ·
+  <a href="https://discord.gg/QFyX2FVkZM">Discord</a>
 </p>
 
 ![A Claude Code orchestrator in Hyprlayer reporting on the two workstreams it handed to a Claude Code worker and a Codex worker](docs/assets/hero.png)
