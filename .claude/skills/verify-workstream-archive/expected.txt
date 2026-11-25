@@ -1,0 +1,8 @@
+PASS fixed TypeOK
+PASS fixed NoAppHolderAtMove
+PASS fixed NeverRolledBack
+PASS fixed RollbackRearms
+PASS v0_9_0 TypeOK
+FAIL v0_9_0 NoAppHolderAtMove
+FAIL v0_9_0 NeverRolledBack
+PASS v0_9_0 RollbackRearms
