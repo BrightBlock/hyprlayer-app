@@ -59,7 +59,7 @@ if [[ "${RELEASE_SKIP_CHECKS:-}" != "1" ]]; then
           if (t["filter-match"].status === "matches") console.log(id + " " + n);' | LC_ALL=C sort
   }
   IGNORED="$(cargo nextest list --workspace --run-ignored only -E "$GATE_FILTER" -T json | matching)"
-  EXPECTED=$'hyprlayer-app::ssh_sign_in ssh_sign_in\nhyprlayer-e2e::pr_lifecycle pr_lifecycle\nhyprlayer-e2e::remote_host remote_host\nhyprlayer-e2e::remote_provider_auth remote_provider_auth\nhyprlayer-e2e::remote_slow_start remote_slow_start'
+  EXPECTED=$'hyprlayer-app::ssh_sign_in ssh_sign_in\nhyprlayer-e2e::pr_lifecycle pr_lifecycle\nhyprlayer-e2e::remote_host remote_host\nhyprlayer-e2e::remote_provider_auth remote_provider_auth\nhyprlayer-e2e::remote_slow_start remote_slow_start\nhyprlayer-e2e::server_memory remote_server_memory'
   if [[ "$IGNORED" != "$EXPECTED" ]]; then
     echo "✗ the gate filter admits a different set of ignored tests:"; echo "$IGNORED"
     echo "  update GATE_FILTER or EXPECTED in scripts/release.sh"
