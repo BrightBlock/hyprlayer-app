@@ -1,181 +1,77 @@
-# Hyprlayer: Desktop App for Spec-Driven AI Development
+<p align="center">
+  <img src="docs/assets/mark.svg" width="56" alt="" />
+</p>
 
-## Overview
+<h1 align="center">Hyprlayer</h1>
 
-Hyprlayer is a native desktop app for spec-driven development with AI coding
-agents — research, plan, implement, validate, and ship without bouncing between
-tools. Each piece of work runs in its own isolated git worktree with an embedded
-Claude Code session, while your knowledge base (thoughts) and your team's
-collaboration ride the storage backend you already use.
+<p align="center">
+  <strong>Orchestrate your coding agents. Or let them do it.</strong><br />
+  A desktop app for running Claude Code, Codex, and OpenCode side by side.
+</p>
 
-It pairs with the [hyprlayer](https://brightblock.ai/hyprlayer) CLI: the CLI owns
-your config and your thoughts storage; the app gives you a workspace on top of it.
+<p align="center">
+  <a href="https://hyprlayer.dev">Website</a> ·
+  <a href="https://hyprlayer.dev/desktop/install">Install</a> ·
+  <a href="https://hyprlayer.dev/cli/getting-started/installation">Docs</a> ·
+  <a href="https://github.com/BrightBlock/hyprlayer-releases/releases">Changelog</a>
+</p>
 
-## Key Features
+![A Claude Code orchestrator in Hyprlayer reporting on the two workstreams it handed to a Claude Code worker and a Codex worker](docs/assets/hero.png)
 
-**The Observatory (home):**
-- Your knowledge graph as a full-bleed, interactive home surface — every
-  document a star colored by its type, every resolved link a strand; scroll to
-  zoom, drag to pan, hover to spotlight, click to open
-- Live agents pinned onto the field, stage-colored cards for what's running
-  right now, and a feed of the latest workstream activity
-- Global search and corpus stats front and center; a guided first-node state
-  points new users at the setup wizard until a repo is connected
+## Install
 
-**The Pipeline:**
-- Spec-driven stages — research → plan → implement → validate → ship — each
-  backed by a Claude Code skill
-- One isolated git worktree per work item, provisioned and torn down for you
-- One-click Ship: commit the worktree, push the branch, and open a pull request
-- Per-session model and reasoning-effort choices (Opus, Sonnet, Haiku, Fable),
-  including 1M-context variants
+It's free and uses the Claude Code, Codex, and OpenCode logins you already have.
+Every build is on the
+[latest release](https://github.com/BrightBlock/hyprlayer-releases/releases/latest).
 
-**Embedded Agent Sessions:**
-- Claude Code runs in-app with a live transcript, tool calls, and a context meter
-- Permission prompts, agent questions, interrupt, resume, and kill — all in the UI
-- Attach knowledge documents to a work item so the agent starts with context
-- File and image attachments for prompts
-
-**Knowledge Library:**
-- Browse, search, and edit your thoughts as first-class documents with frontmatter
-- Templated document creation and a Markdown preview with GitHub-flavored rendering
-- Documents link into the home Observatory's graph via `related` frontmatter
-  and shared tags/tickets
-
-**Git & Review:**
-- Fork-style Git panel for staging, unstaging, and discarding changes
-- Side-by-side and unified diffs with syntax highlighting and an in-app file viewer
-- Per-worktree status so you always see exactly what an agent changed
-
-**Storage Backends:**
-- Bring your own backend: Git, Obsidian, Notion, or Anytype
-- The app reads and watches the CLI's config so your projects and thoughts stay
-  in sync
-
-## Platform Support
-
-- **macOS** — Apple Silicon `.dmg`, Developer ID–signed and notarized, with
-  in-app auto-updates
-- **Windows** — x64 NSIS installer (Tauri 2 + WebView2), with in-app auto-updates
-- **Linux** — x64 distro packages (Tauri 2 + WebKitGTK 4.1). Arch is the primary
-  target via the AUR; `.deb` and `.rpm` are published for everyone else. No
-  AppImage.
+### macOS (Apple Silicon)
 
 ```sh
-paru -S hyprlayer-desktop-bin            # Arch (or yay)
-sudo apt install ./Hyprlayer_*_amd64.deb # Debian / Ubuntu
-sudo dnf install ./Hyprlayer-*.x86_64.rpm # Fedora / RHEL / openSUSE
+brew install --cask brightblock/tap/hyprlayer-desktop
 ```
 
-Each package pulls in WebKitGTK 4.1, GTK 3, `git` and `xdg-utils`. The `.deb`
-and `.rpm` are built on Arch, so they need a reasonably current glibc — Ubuntu
-24.04, Debian 13 or Fedora 40 and newer.
+Or download the `.dmg` from the latest release.
 
-On macOS and Windows, running apps poll a signed manifest and install updates in
-place; there is no separate update step. Linux packages belong to the package
-manager, so the app only tells you a new version is out — `paru -Syu`, `apt` or
-`dnf` installs it.
+### Windows (x64)
 
-## Running a standalone server
+Download the `-setup.exe` installer from the latest release and run it. It
+isn't code-signed yet, so SmartScreen warns: choose **More info → Run anyway**.
 
-The runtime lives in a separate process, `hyprlayer-server` (ADR-0009). The
-desktop ships its own copy and starts it for you, so nothing below is needed to
-use the app on one machine. Install the package when you want a machine you
-reach *over SSH* — a workstation you leave running, a build box — to host
-sessions, terminals and scripts that outlive your laptop.
+### Arch Linux (x86_64)
 
 ```sh
-paru -S hyprlayer-server-bin                  # Arch
-brew install brightblock/tap/hyprlayer-server # macOS, Linuxbrew
+yay -S hyprlayer-desktop-bin    # or: paru -S hyprlayer-desktop-bin
 ```
 
-Neither starts anything. Run it in the foreground with `hyprlayer-server serve`,
-or enable it for your user:
+### Debian and Ubuntu (x86_64)
+
+Download `Hyprlayer_<version>_amd64.deb` from the latest release, then:
 
 ```sh
-systemctl --user enable --now hyprlayer-server                       # Linux
-cp .../ai.brightblock.hyprlayer.server.plist ~/Library/LaunchAgents/ # macOS
-launchctl load ~/Library/LaunchAgents/ai.brightblock.hyprlayer.server.plist
+sudo apt install ./Hyprlayer_<version>_amd64.deb
 ```
 
-A user unit, never a system one: every path the runtime uses is home-relative,
-and on macOS the `claude` CLI it spawns reads its login from the user's
-Keychain, which only a user session has unlocked. On Linux the unit survives a logout only with lingering
-enabled (`loginctl enable-linger $USER`).
+Use `apt` rather than `dpkg -i` so the dependencies resolve.
 
-Point the desktop at it by adding the host to `<app config dir>/hosts.json`:
+### Fedora, RHEL, and openSUSE (x86_64)
 
-```json
-{ "hosts": [{ "destination": "my-box", "label": "My box" }], "active": "my-box" }
-```
-
-`destination` is passed straight to `ssh`, so any alias your `~/.ssh/config`
-resolves works. The app then runs `ssh <destination> hyprlayer-server relay`.
-If ssh needs a password or asks you to trust a new host, the app asks in a
-dialog and stores neither.
-
-Four things to know before you rely on it:
-
-- **There is no network listener and no authentication.** Authorization is
-  filesystem permissions on the socket, plus SSH. Nothing is exposed to a
-  network, and nothing else can be.
-- **One server serves one profile and one user.** Every attached client shares
-  one `settings.json`, one database and one session set, and can act on all of
-  it. A second user means a second server on a second profile.
-- **An app update ends every live session on that profile.** The protocol
-  handshake is strict equality, so an upgraded desktop shuts the old server down
-  and starts its own matching build. Quitting the app is free; updating is not.
-- **`git` and `gh` on a server need that machine's own credentials.** The
-  `SSH_AUTH_SOCK` your client sends is a path on the *client*, meaningless
-  across machines — use agent forwarding (`ssh -A`) or a key on the server. And
-  expose real binaries on the session's `PATH`: a CLI wrapped in an
-  interactive-auth shim (1Password shell plugins, say) will *hang* a session
-  rather than fail it, because there is no TTY to prompt on.
-
-## Development
-
-Prerequisites: Rust (stable), Node 22+, pnpm 11+, Zig 0.16.0 (pinned in
-`mise.toml`; `mise install` fetches it), and the
-[Tauri platform deps](https://tauri.app/start/prerequisites/).
+Download `Hyprlayer-<version>-1.x86_64.rpm` from the latest release, then:
 
 ```sh
-pnpm install
-pnpm tauri dev          # run the app (debug)
-
-cargo test --workspace  # rust tests (also regenerates src/lib/bindings.ts); the release gate runs them with cargo nextest
-pnpm typecheck && pnpm lint && pnpm test   # frontend checks
-pnpm tauri build        # production bundle
+sudo dnf install ./Hyprlayer-<version>-1.x86_64.rpm      # Fedora, RHEL
+sudo zypper install ./Hyprlayer-<version>-1.x86_64.rpm   # openSUSE
 ```
 
-To exercise the app against real data, install the hyprlayer CLI and initialize
-a repository:
+The Linux packages need a recent glibc: Ubuntu 24.04, Debian 13, Fedora 40, or
+newer.
+
+### The CLI (optional)
+
+Install the [hyprlayer CLI](https://hyprlayer.dev/cli/getting-started/installation)
+if you want the same workflow's slash commands in your terminal.
 
 ```sh
-brew install brightblock/tap/hyprlayer   # or scoop/winget on Windows
-cd ~/code/your-repo && hyprlayer thoughts init
+brew install brightblock/tap/hyprlayer   # macOS
+winget install BrightBlock.Hyprlayer     # Windows
+yay -S hyprlayer-bin                     # Arch
 ```
-
-### Dogfooding `main`
-
-"Hyprlayer Dev" is a release-profile build of `origin/main` that installs beside
-the released app under its own identifier — its own database, settings and
-launcher entry, so the two never collide. It needs no checkout: anyone with
-access to this repo can run it straight from GitHub, where `gh` supplies the
-auth.
-
-```sh
-bash <(gh api repos/BrightBlock/hyprlayer-app/contents/scripts/dev-install-linux.sh \
-         -H 'Accept: application/vnd.github.raw')     # macos: dev-install-macos.sh
-```
-
-```powershell
-& ([scriptblock]::Create((gh api repos/BrightBlock/hyprlayer-app/contents/scripts/dev-install-windows.ps1 -H 'Accept: application/vnd.github.raw' | Out-String)))
-```
-
-It builds in a throwaway clone under the cache dir, so it can run while you have
-uncommitted work. Rerun the same command to update (it no-ops if `main` has not
-moved); pass `--uninstall` / `-Uninstall` to remove it, `--help` for the rest of
-the flags. Prerequisites are the full build toolchain above — no signing or
-publish credentials.
-
-See `docs/RELEASING.md` for how releases and in-app updates are published.
