@@ -1,6 +1,14 @@
 {
   "versions": [
     {
+      "version": "0.9.1",
+      "date": "2026-11-25",
+      "summary": "Updates the release download URL.",
+      "notes": [
+        "Updates the release download URL."
+      ]
+    },
+    {
       "version": "0.9.0",
       "date": "2026-11-25",
       "summary": "Meet the Lead Engineer, an agent per project that queues, runs and lands work.",
