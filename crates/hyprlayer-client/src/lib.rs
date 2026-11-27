@@ -14,3 +14,4 @@ pub mod provision;
 pub mod server_version;
 pub mod ssh;
 pub mod supervisor;
+pub mod terminal;

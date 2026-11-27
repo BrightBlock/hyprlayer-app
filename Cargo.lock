@@ -2051,6 +2051,7 @@ dependencies = [
  "base64 0.22.1",
  "dirs 5.0.1",
  "gethostname",
+ "ghostty-vt",
  "hyprlayer-core",
  "hyprlayer-e2e",
  "hyprlayer-proto",
@@ -2120,6 +2121,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "ghostty-vt",
+ "hyprlayer-client",
  "hyprlayer-core",
  "hyprlayer-proto",
  "hyprlayer-server",

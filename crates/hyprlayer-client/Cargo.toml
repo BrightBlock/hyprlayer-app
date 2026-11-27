@@ -12,6 +12,7 @@ name = "hyprlayer-askpass"
 path = "src/bin/hyprlayer-askpass.rs"
 
 [dependencies]
+ghostty-vt.workspace = true
 hyprlayer-core = { workspace = true, features = ["specta"] }
 hyprlayer-proto.workspace = true
 hyprlayer-server.workspace = true
