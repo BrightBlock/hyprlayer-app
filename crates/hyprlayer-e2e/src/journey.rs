@@ -18,6 +18,7 @@ pub struct Journey {
     aliases: Vec<(String, String)>,
     environment: Map<String, Value>,
     logs: PathBuf,
+    app_data: PathBuf,
     finished: bool,
 }
 
@@ -35,6 +36,7 @@ impl Journey {
             aliases: Vec::new(),
             environment: Map::new(),
             logs: sandbox.logs.clone(),
+            app_data: sandbox.app_data.clone(),
             finished: false,
         };
         journey.alias(sandbox.root.display().to_string(), "$SANDBOX");
@@ -201,7 +203,52 @@ impl Journey {
         for entry in std::fs::read_dir(&self.logs)?.flatten() {
             std::fs::copy(entry.path(), dir.join("logs").join(entry.file_name()))?;
         }
+        self.write_session_logs(&dir);
         Ok(dir)
+    }
+
+    /// One `session-logs/<harness>-<id>.jsonl` per session in the sandbox's DB, for scripts/transcript-diff.
+    fn write_session_logs(&self, dir: &std::path::Path) {
+        let db = self.app_data.join("hyprlayer.db");
+        let Ok(conn) = rusqlite::Connection::open_with_flags(
+            &db,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        ) else {
+            return;
+        };
+        let Ok(mut sessions) =
+            conn.prepare("SELECT id, harness FROM sessions ORDER BY started_at, id")
+        else {
+            return;
+        };
+        let rows: Vec<(String, String)> = sessions
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map(|rows| rows.flatten().collect())
+            .unwrap_or_default();
+        for (id, harness) in rows {
+            let Ok(mut events) = conn.prepare(
+                "SELECT seq, kind, payload, created_at FROM session_events WHERE session_id = ?1 ORDER BY seq",
+            ) else {
+                continue;
+            };
+            let lines: String = events
+                .query_map([&id], |r| {
+                    let payload: String = r.get(2)?;
+                    let event: Value = serde_json::from_str(&payload).unwrap_or(Value::Null);
+                    Ok(json!({ "seq": r.get::<_, i64>(0)?, "kind": r.get::<_, String>(1)?, "createdAt": r.get::<_, f64>(3)?, "event": event }))
+                })
+                .map(|rows| rows.flatten().map(|l| l.to_string() + "\n").collect())
+                .unwrap_or_default();
+            if lines.is_empty() {
+                continue;
+            }
+            let out = dir.join("session-logs");
+            let _ = std::fs::create_dir_all(&out);
+            let _ = std::fs::write(
+                out.join(format!("{harness}-{}.jsonl", &id[..id.len().min(8)])),
+                lines,
+            );
+        }
     }
 
     fn normalize(&self, value: &Value) -> Value {
