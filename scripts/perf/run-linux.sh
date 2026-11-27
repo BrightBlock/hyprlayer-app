@@ -3,8 +3,10 @@
 # Env: PERF_SESSION=wayland|x11 (default wayland), PERF_RUNS, PERF_SCENARIO, PERF_FIRST.
 # Needs a graphical session; over ssh it borrows the logged-in one.
 # Idle off for the whole run: a blanked display stalls the webview's frame clock.
-if [ -z "${PERF_INHIBITED:-}" ] && command -v systemd-inhibit >/dev/null; then
-  PERF_INHIBITED=1 exec systemd-inhibit --what=idle:sleep --why="hyprlayer perf run" "$0" "$@"
+# Over ssh polkit may refuse the inhibitor; the run then relies on post_launch's `dpms on`.
+if [ -z "${PERF_INHIBITED:-}" ] && command -v systemd-inhibit >/dev/null &&
+  systemd-inhibit --what=idle --why=probe true 2>/dev/null; then
+  PERF_INHIBITED=1 exec systemd-inhibit --what=idle --why="hyprlayer perf run" "$0" "$@"
 fi
 source "$(dirname "$0")/common.sh"
 
@@ -25,19 +27,31 @@ if [ "$SESSION" = x11 ]; then
 fi
 
 hypr() { command -v hyprctl >/dev/null && [ -n "${HYPRLAND_INSTANCE_SIGNATURE:-}" ]; }
+# Hyprland 0.56 takes Lua for dispatch and config; older builds take the classic syntax.
+hdispatch() { hyprctl dispatch "$1" 2>&1 | grep -q '^ok' || hyprctl dispatch $2 >/dev/null 2>&1 || true; }
+hset_animations() {
+  hyprctl eval "hl.config({ animations = { enabled = $1 } })" 2>&1 | grep -q '^ok' ||
+    hyprctl keyword animations:enabled "$([ "$1" = true ] && echo 1 || echo 0)" >/dev/null 2>&1 || true
+}
 ANIMATIONS=""
 
 # Compositor animations off for the run, restored after; a tiled window would also ignore the resize drag.
 if hypr; then
-  ANIMATIONS="$(hyprctl getoption animations:enabled -j | node -e 'console.log(JSON.parse(require("fs").readFileSync(0,"utf8")).int)')"
-  hyprctl keyword animations:enabled 0 >/dev/null
+  ANIMATIONS="$(hyprctl getoption animations:enabled -j | node -e 'const o=JSON.parse(require("fs").readFileSync(0,"utf8"));console.log(o.bool ?? (o.int ? true : false))')"
+  hset_animations false
 fi
-restore_session() { if hypr && [ -n "$ANIMATIONS" ]; then hyprctl keyword animations:enabled "$ANIMATIONS" >/dev/null; fi; }
+restore_session() { if hypr && [ -n "$ANIMATIONS" ]; then hset_animations "$ANIMATIONS"; fi; }
 
 # Floats the app's window at a fixed size so the resize drag is the client's, not the tiler's.
 post_launch() {
+  local dir="$1"
   hypr || return 0
-  hyprctl dispatch dpms on >/dev/null
+  hdispatch 'hl.dsp.dpms({ action = "enable" })' "dpms on"
+  # Run 7 of the first baseline found DPMS off mid-soak with no idle daemon; keep it on while the app lives.
+  (while kill -0 "$APP_PID" 2>/dev/null; do
+    sleep 30
+    hdispatch 'hl.dsp.dpms({ action = "enable" })' "dpms on"
+  done) &
   local addr=""
   for _ in $(seq 1 120); do
     addr="$(hyprctl clients -j | node -e 'const c=JSON.parse(require("fs").readFileSync(0,"utf8")).find(c=>c.pid==process.argv[1]);if(c)console.log(c.address+" "+c.floating)' "$APP_PID" 2>/dev/null || true)"
@@ -46,9 +60,11 @@ post_launch() {
   done
   [ -n "$addr" ] || { log "no window found for pid $APP_PID"; return 0; }
   set -- $addr
-  [ "$2" = true ] || hyprctl dispatch togglefloating "address:$1" >/dev/null
-  hyprctl dispatch resizewindowpixel "exact ${PERF_WIDTH:-1500} ${PERF_HEIGHT:-900},address:$1" >/dev/null
-  hyprctl dispatch movewindowpixel "exact 50 50,address:$1" >/dev/null
+  local w="${PERF_WIDTH:-1500}" h="${PERF_HEIGHT:-900}" win="address:$1"
+  hdispatch "hl.dsp.window.float({ action = \"on\", window = \"$win\" })" "setfloating $win"
+  hdispatch "hl.dsp.window.resize({ x = $w, y = $h, relative = false, window = \"$win\" })" "resizewindowpixel exact $w $h,$win"
+  hdispatch "hl.dsp.window.move({ x = 50, y = 50, relative = false, window = \"$win\" })" "movewindowpixel exact 50 50,$win"
+  hyprctl clients -j | node -e 'const c=JSON.parse(require("fs").readFileSync(0,"utf8")).find(c=>c.address==process.argv[1]);console.log(JSON.stringify({floating:c?.floating,size:c?.size,at:c?.at}))' "$1" >"$dir/window.json" 2>/dev/null || true
 }
 
 print_environment() {

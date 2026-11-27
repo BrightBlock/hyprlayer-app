@@ -127,7 +127,7 @@ wait_report() {
     kill -0 "$APP_PID" 2>/dev/null || { log "the app exited before reporting"; return 1; }
     sleep 1
   done
-  log "no report within ${limit}s"
+  log "no report within ${limit}s; last step: $(cat "$(dirname "$report")/breadcrumb.json" 2>/dev/null || echo none)"
   return 1
 }
 

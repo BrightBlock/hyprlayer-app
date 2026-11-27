@@ -56,31 +56,57 @@ export function terminalFrame(bytes: Uint8Array): void {
 function waitForFrame(needle: string, timeoutMs: number): Promise<number> {
   lastFrameTail = "";
   return new Promise((resolve, reject) => {
-    waiter = { needle, resolve };
-    setTimeout(() => {
-      if (waiter?.needle === needle) {
-        waiter = null;
-        reject(new Error(`no frame showed ${needle} within ${timeoutMs} ms`));
-      }
+    // Matched by identity: a stale timer with the same needle must not drop a live waiter.
+    const mine = {
+      needle,
+      resolve: (at: number) => {
+        clearTimeout(timer);
+        resolve(at);
+      },
+    };
+    const timer = setTimeout(() => {
+      if (waiter === mine) waiter = null;
+      reject(new Error(`no frame showed ${needle} within ${timeoutMs} ms`));
     }, timeoutMs);
+    waiter = mine;
   });
 }
+
+/** Rejects once `ms` of wall clock pass, so a hung step becomes an error and the report still lands. */
+function withDeadline<T>(label: string, ms: number, work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} still running after ${ms} ms`)), ms);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
+
+const breadcrumb = (step: string, extra: Record<string, unknown> = {}) =>
+  void call("breadcrumb", { step, visibility: document.visibilityState, ...extra }).catch(() => {});
 
 type Frames = { frames: number; p50: number; p95: number; p99: number; max: number; over33Pct: number };
 
 /** Per-frame deltas over `ms`, with `drive` called every frame to move whatever is being measured. */
 function recordFrames(ms: number, drive?: (elapsed: number, dt: number) => void): Promise<Frames> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     const deltas: number[] = [];
     let start = 0;
     let last = 0;
+    let stalled = false;
+    // rAF stops in a hidden, occluded or blanked window; give up rather than wait forever.
+    const stall = setTimeout(() => {
+      stalled = true;
+      reject(new Error(`rAF stalled: ${deltas.length} frames in ${ms + 15_000} ms (${document.visibilityState})`));
+    }, ms + 15_000);
     const tick = (t: number) => {
+      if (stalled) return;
       if (!start) start = last = t;
       const dt = t - last;
       if (t !== start) deltas.push(dt);
       last = t;
       drive?.(t - start, dt);
       if (t - start < ms) return requestAnimationFrame(tick);
+      clearTimeout(stall);
       const sorted = [...deltas].sort((a, b) => a - b);
       const q = (p: number) => sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] ?? 0;
       resolve({
@@ -177,9 +203,10 @@ async function echoLatency(id: string, samples: number): Promise<void> {
 async function run(host: PerfHost, config: Config): Promise<void> {
   const terminal = config.terminals[0];
   const phase = (name: string) => call("phase", name);
-  const guarded = async (label: string, work: () => Promise<void>) => {
+  const guarded = async (label: string, deadlineMs: number, work: () => Promise<void>) => {
+    breadcrumb(label);
     try {
-      await work();
+      await withDeadline(label, deadlineMs, work());
     } catch (e) {
       errors.push(`${label}: ${String(e)}`);
     }
@@ -189,7 +216,9 @@ async function run(host: PerfHost, config: Config): Promise<void> {
     const label = step.do;
     // rAF stalls in a hidden window, so every measured step records what the page saw.
     proof[`visibility.${label}`] = document.visibilityState;
-    await guarded(label, async () => {
+    // Generous: the watchdog only exists to turn a hang into an error.
+    const deadlineMs = num(step, "secs", 0) * 1000 + 300_000;
+    await guarded(label, deadlineMs, async () => {
       switch (step.do) {
         case "first_interactive": {
           await host.projectsRendered();
@@ -247,8 +276,11 @@ async function run(host: PerfHost, config: Config): Promise<void> {
           const until = Date.now() + num(step, "secs", 600) * 1000;
           let rounds = 0;
           while (Date.now() < until) {
+            breadcrumb("soak.scroll", { round: rounds });
             await scroll(host, 8, 1500);
-            await tokenStream(host, 6);
+            breadcrumb("soak.stream", { round: rounds });
+            await withDeadline("soak.stream", 90_000, tokenStream(host, 6));
+            breadcrumb("soak.terminal", { round: rounds });
             await terminalRun(terminal, "seq 1 100000; printf 'PERF_%s\\n' SOAK_END", "PERF_SOAK_END");
             rounds += 1;
           }
@@ -261,6 +293,7 @@ async function run(host: PerfHost, config: Config): Promise<void> {
       }
     });
   }
+  breadcrumb("report");
   proof["transcript"] = host.transcriptProof();
   proof["terminal.grid"] = host.terminalGrid();
   proof["terminal.frames_acked"] = framesAcked;

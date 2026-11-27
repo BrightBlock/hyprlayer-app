@@ -131,6 +131,19 @@ pub async fn perf_probe(
             }
             Err(AppError::internal(format!("no ack for phase {name}")))
         }
+        // Where the scenario is, so a stalled run names its step.
+        "breadcrumb" => {
+            let dir = env("HYPRLAYER_PERF_PHASE_DIR")
+                .ok_or_else(|| AppError::internal("HYPRLAYER_PERF_PHASE_DIR is not set"))?;
+            let mut body = payload.unwrap_or_default();
+            body["atNs"] = json!(now_ns);
+            std::fs::write(
+                std::path::Path::new(&dir).join("breadcrumb.json"),
+                body.to_string(),
+            )
+            .map_err(|e| AppError::internal(e.to_string()))?;
+            Ok(json!(true))
+        }
         "now" => Ok(json!(now_ns)),
         other => Err(AppError::internal(format!("unknown perf op {other}"))),
     }
