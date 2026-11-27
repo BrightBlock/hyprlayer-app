@@ -2,7 +2,7 @@
 // Prints median, range and run count per metric over target/perf/<client>/<n>/report.json.
 // `--check` summarizes two hand-made reports and fails if the figures are wrong.
 
-import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -31,7 +31,7 @@ export function summarize(reports) {
 
 export function load(dir) {
   return readdirSync(dir, { withFileTypes: true })
-    .filter((e) => e.isDirectory())
+    .filter((e) => e.isDirectory() && existsSync(join(dir, e.name, "report.json")))
     .sort((a, b) => Number(a.name) - Number(b.name))
     .map((e) => JSON.parse(readFileSync(join(dir, e.name, "report.json"), "utf8")));
 }
@@ -76,7 +76,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   else {
     const base = args[0] ?? join(root, "target", "perf");
     for (const e of readdirSync(base, { withFileTypes: true }).filter((e) => e.isDirectory())) {
-      print(e.name, load(join(base, e.name)));
+      const reports = load(join(base, e.name));
+      if (reports.length) print(e.name, reports);
     }
   }
 }
