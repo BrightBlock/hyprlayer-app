@@ -197,7 +197,10 @@ fn selftest_run(cx: &mut App, window: gpui::AnyWindowHandle, spike: Entity<Spike
         let down = |p| PlatformInput::MouseDown(MouseDownEvent { button: MouseButton::Left, position: p, modifiers: Default::default(), click_count: 1, first_mouse: false });
         let mv = |p| PlatformInput::MouseMove(MouseMoveEvent { position: p, pressed_button: Some(MouseButton::Left), modifiers: Default::default() });
         let up = |p| PlatformInput::MouseUp(MouseUpEvent { button: MouseButton::Left, position: p, modifiers: Default::default(), click_count: 1 });
-        let (a, b) = (point(px(712.0), px(70.0)), point(px(1000.0), px(72.0)));
+        let width = cx.update(|cx| window.update(cx, |_, w, _| w.bounds().size.width).ok()).unwrap_or(px(1400.0));
+        // The markdown pane is the right half; its paragraph sits ~70 px down.
+        let left = width / 2.0 + px(12.0);
+        let (a, b) = (point(left, px(70.0)), point(left + px(290.0), px(72.0)));
         let step = Duration::from_millis(60);
         let mut drag = ev(mv(a));
         cx.background_executor().timer(step).await;
