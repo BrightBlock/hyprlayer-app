@@ -445,6 +445,11 @@ pub(crate) async fn attach_client(
     runtime_events::spawn(handle.clone(), client);
 }
 
+#[cfg(feature = "perf-probe")]
+fn perf_probe_handler() -> impl Fn(tauri::ipc::Invoke<tauri::Wry>) -> bool + Send + Sync + 'static {
+    tauri::generate_handler![commands::diagnostics::perf_probe]
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     webkit_env::apply();
@@ -512,8 +517,22 @@ pub fn run() {
     #[cfg(target_os = "macos")]
     let tauri_builder = tauri_builder.menu(macos_menu);
 
+    let handler = builder.invoke_handler();
+    // Outside specta, so `bindings.ts` never learns the probe exists.
+    #[cfg(feature = "perf-probe")]
+    let handler = {
+        let probe = perf_probe_handler();
+        move |invoke: tauri::ipc::Invoke<tauri::Wry>| {
+            if invoke.message.command() == "perf_probe" {
+                probe(invoke)
+            } else {
+                handler(invoke)
+            }
+        }
+    };
+
     tauri_builder
-        .invoke_handler(builder.invoke_handler())
+        .invoke_handler(handler)
         .setup(move |app| {
             builder.mount_events(app);
 

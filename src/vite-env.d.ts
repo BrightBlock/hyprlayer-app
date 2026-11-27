@@ -4,3 +4,7 @@
 interface FocusOptions {
   focusVisible?: boolean;
 }
+
+interface ImportMetaEnv {
+  readonly VITE_PERF_PROBE?: string;
+}
