@@ -244,6 +244,10 @@ fn selftest_run(cx: &mut App, window: gpui::AnyWindowHandle, spike: Entity<Spike
         if let Some(hold) = std::env::var("HYPRLAYER_SPIKE_HOLD").ok().and_then(|v| v.parse::<u64>().ok()) {
             cx.background_executor().timer(Duration::from_secs(hold)).await;
         }
+        let pid = feed::HOSTED_PID.load(std::sync::atomic::Ordering::Relaxed);
+        if pid != 0 {
+            let _ = std::process::Command::new("kill").arg(pid.to_string()).status();
+        }
         cx.update(|cx| cx.quit());
     })
     .detach();

@@ -9,6 +9,9 @@ use hyprlayer_proto::Features;
 use hyprlayer_server::client::RpcClient;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 
+/// The hosted server's pid: `cx.quit()` exits without dropping the child, so quit kills it by pid.
+pub static HOSTED_PID: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
 pub enum Msg {
     Bytes(Vec<u8>),
     Resize(u16, u16),
@@ -172,7 +175,7 @@ mod host {
         } else {
             data.join("hyprlayer.sock")
         };
-        let _child = tokio::process::Command::new(server_bin()?)
+        let child = tokio::process::Command::new(server_bin()?)
             .arg("serve")
             .env_clear()
             .env("HOME", &home).env("USER", "spike").env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin")
@@ -182,6 +185,8 @@ mod host {
             .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
             .kill_on_drop(true)
             .spawn()?;
+        HOSTED_PID.store(child.id().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+        let _child = child;
         tx.send(Msg::Status("starting hosted server on a throwaway profile".into()))?;
         let client = loop {
             match RpcClient::connect_socket(&socket).await {
