@@ -8,6 +8,7 @@ members = [
     "crates/hyprlayer-server",
     "crates/hyprlayer-e2e",
     "crates/ghostty-vt",
+    "crates/gpui-spike",
 ]
 
 [workspace.package]
