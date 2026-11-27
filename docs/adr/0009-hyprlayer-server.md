@@ -79,7 +79,7 @@ therefore asked every user to restart their server and lose its sessions.
 - `crates/hyprlayer-server/Cargo.toml` carries its own `version`
   (`hyprlayer_server::VERSION`), sent in `Hello` as `version`. Servers up to 0.8.2 send
   none and are read as 0.8.2.
-- The app declares `MIN_SERVER_VERSION` (`src-tauri/src/server_version.rs`). A server
+- The app declares `MIN_SERVER_VERSION` (`crates/hyprlayer-client/src/server_version.rs`). A server
   below it is replaced locally, the way a protocol mismatch is, and blocks a remote
   connection with `remote_server_outdated` until the user updates it. A server at or
   above it but older than the one the app ships is an optional update. Bytes are

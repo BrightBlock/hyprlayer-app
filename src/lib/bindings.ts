@@ -310,10 +310,7 @@ export const commands = {
 	 *  necessarily local, since there is no server yet to ask (plan Phase 1 §7).
 	 */
 	listHosts: () => typedError<HostsFile, AppError>(__TAURI_INVOKE("list_hosts")),
-	/**
-	 *  Writes the whole file. There is one window and one writer, so there is
-	 *  nothing to merge (`BranchPrefixEditor`'s shape, plan Phase 1 §7).
-	 */
+	/**  Merges into the file on disk: another desktop client may share it. */
 	saveHosts: (file: HostsFile) => typedError<null, AppError>(__TAURI_INVOKE("save_hosts", { file })),
 	/**
 	 *  JetBrains Gateway's explicit "Test Connection" (plan Phase 1 §3): probes

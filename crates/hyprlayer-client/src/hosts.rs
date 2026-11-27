@@ -1,12 +1,6 @@
-//! The remote host list and which one is active, at
-//! `<app_config_dir>/hosts.json` — not `settings.json` (ADR-0009, plan Phase 5
-//! §2). An older binary tolerates an unknown key on read and erases it on its
-//! next write, since `AppSettings` has no flatten-catchall; and a local server
-//! already owns wholesale rewrites of `settings.json`, so a second shell-side
-//! writer would violate ADR-0002's single-writer rule. This file has exactly
-//! one writer: the desktop, and only the desktop ever reads it — deciding
-//! which server to reach is necessarily local, since there is no server to
-//! ask before you've picked one.
+//! The remote host list and which one is active, at `<app_config_dir>/hosts.json`, not
+//! `settings.json` (ADR-0009). Only desktops read it, since deciding which server to reach
+//! is local; every desktop client of a profile may write it, so writes merge (`save`).
 
 use std::path::{Path, PathBuf};
 
@@ -103,16 +97,26 @@ pub fn load(app_config_dir: &Path) -> HostsFile {
     })
 }
 
-/// Tmp-then-rename, like every other config write in this tree
-/// (`settings.rs::persist`, `config/mod.rs::write_config_atomic`). Called by
-/// the `save_hosts` command (plan Phase 1 §7) — there is one window and one
-/// writer, so `save_hosts` always writes the whole file rather than merging.
+/// Read, merge, write: two clients write this file, so keys this writer does not own
+/// survive. Tmp-then-rename, like every other config write in this tree.
 pub fn save(app_config_dir: &Path, file: &HostsFile) -> std::io::Result<()> {
     let path = hosts_path(app_config_dir);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    let json = serde_json::to_string_pretty(file).map_err(std::io::Error::other)?;
+    let mut merged = match std::fs::read(&path) {
+        Ok(bytes) => match serde_json::from_slice::<serde_json::Value>(&bytes) {
+            Ok(serde_json::Value::Object(map)) => map,
+            _ => serde_json::Map::new(),
+        },
+        Err(_) => serde_json::Map::new(),
+    };
+    if let serde_json::Value::Object(owned) =
+        serde_json::to_value(file).map_err(std::io::Error::other)?
+    {
+        merged.extend(owned);
+    }
+    let json = serde_json::to_string_pretty(&merged).map_err(std::io::Error::other)?;
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, json)?;
     std::fs::rename(&tmp, path)
@@ -182,6 +186,28 @@ mod tests {
 
         assert_eq!(load(dir.path()), file);
         assert_eq!(target(dir.path()), Target::Remote(file.hosts[0].clone()));
+    }
+
+    #[test]
+    fn a_save_keeps_the_keys_it_does_not_own() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("hosts.json"),
+            r#"{"hosts":[],"active":null,"localProfile":null,"theirs":{"a":1}}"#,
+        )
+        .unwrap();
+        save(
+            dir.path(),
+            &HostsFile {
+                active: Some("nexus".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let raw: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.path().join("hosts.json")).unwrap()).unwrap();
+        assert_eq!(raw["theirs"]["a"], 1);
+        assert_eq!(raw["active"], "nexus");
     }
 
     #[test]

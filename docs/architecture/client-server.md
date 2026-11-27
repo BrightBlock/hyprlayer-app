@@ -46,7 +46,7 @@ anything. That file is the one decision that has to be made locally, because
 there is no server to ask which server to reach. It lives in `app_config_dir`
 rather than in `settings.json` — the desktop is its only reader and its only
 writer, and a second shell-side writer to `settings.json` would break ADR-0002's
-single-writer rule (`src-tauri/src/hosts.rs`).
+single-writer rule (`crates/hyprlayer-client/src/hosts.rs`).
 
 No active host means the local profile; an active host means SSH, and a failure
 there must never fall back to local. Connecting to the wrong profile's data is
@@ -560,7 +560,7 @@ the SSH connection ends the relay, not the daemon behind it.
 
 ### Signing in
 
-Every `ssh` the desktop runs is built in `src-tauri/src/ssh/`. When ssh needs
+Every `ssh` the desktop runs is built in `crates/hyprlayer-client/src/ssh/`. When ssh needs
 something only the user has (trust in a new host key, a password, a key
 passphrase), it runs the app's own binary as `SSH_ASKPASS`
 (`SSH_ASKPASS_REQUIRE=force`). That run forwards the question over a 0600 socket
@@ -647,11 +647,11 @@ name.
 | Runtime-event fan-out | `crates/hyprlayer-server/src/events.rs` |
 | The SSH relay's server half | `crates/hyprlayer-server/src/relay.rs` |
 | `RpcClient`, `read_loop`, `EventStream` | `crates/hyprlayer-server/src/client.rs` |
-| Find / spawn / evict, SSH failure classification | `src-tauri/src/supervisor.rs` |
-| Version-keyed remote install | `src-tauri/src/provision.rs` |
+| Find / spawn / evict, SSH failure classification | `crates/hyprlayer-client/src/supervisor.rs` |
+| Version-keyed remote install | `crates/hyprlayer-client/src/provision.rs` |
 | Connection state, `Lost` vs `Failed` | `src-tauri/src/state.rs` |
 | Runtime event → Tauri event | `src-tauri/src/runtime_events.rs` |
-| The host list and which one is active | `src-tauri/src/hosts.rs` |
+| The host list and which one is active | `crates/hyprlayer-client/src/hosts.rs` |
 | Reconnect loop | `src/features/hosts/reconnect.ts` |
 | PTY threads and the output ring | `crates/hyprlayer-core/src/terminal/mod.rs` |
 | Terminal service and registry | `crates/hyprlayer-core/src/runtime/terminals.rs` |

@@ -41,7 +41,7 @@ $1
 EOF
 }
 server_version() { printf '[package]\nname = "hyprlayer-server"\nversion = "%s"\n' "$1" > crates/hyprlayer-server/Cargo.toml; }
-min_version() { printf 'pub const MIN_SERVER_VERSION: &str = "%s";\n' "$1" > src-tauri/src/server_version.rs; }
+min_version() { printf 'pub const MIN_SERVER_VERSION: &str = "%s";\n' "$1" > crates/hyprlayer-client/src/server_version.rs; }
 commit() { git add -A && git commit -qm "$1"; }
 proto() { mkdir -p crates/hyprlayer-proto/src && printf 'pub const NEW_FEATURE: &str = "%s";\n' "$1" > crates/hyprlayer-proto/src/lib.rs; }
 gated() { printf '// A note.\n\n// Another.\nfn f(c: RpcClient) {\n    // server-compat: gated on %s\n    c.new_thing();\n}\n' "$1" > src-tauri/src/commands/gated.rs; }
@@ -55,7 +55,7 @@ replace() {
 
 mkdir -p "$WORK/base" && cd "$WORK/base"
 git init -q
-mkdir -p crates/hyprlayer-server/src src-tauri/src/commands
+mkdir -p crates/hyprlayer-server/src crates/hyprlayer-client/src src-tauri/src/commands
 table "$TABLE"
 server_version 0.9.0
 min_version 0.9.0
@@ -104,6 +104,9 @@ case_ baseline ''
 case_ new_command_app_calls "table \"\$TABLE
     NewThing: new_thing() -> Thing;\"
   echo 'fn f(c: RpcClient) { c.new_thing(); }' > src-tauri/src/commands/new.rs"
+case_ new_command_client_crate_calls "table \"\$TABLE
+    NewThing: new_thing() -> Thing;\"
+  echo 'fn f(c: RpcClient) { c.new_thing(); }' > crates/hyprlayer-client/src/new.rs"
 case_ new_command_server_only_with_comment_mention "table \"\$TABLE
     NewThing: new_thing() -> Thing;\""
 case_ arg_type_changed "replace crates/hyprlayer-server/src/rpc.rs 's/get_thing\(id: String\)/get_thing(id: u64)/'"

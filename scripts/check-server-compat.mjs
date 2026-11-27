@@ -17,8 +17,8 @@ const root = rootArg > 0 ? process.argv[rootArg + 1] : join(dirname(fileURLToPat
 const RPC = "crates/hyprlayer-server/src/rpc.rs";
 const PROTO = "crates/hyprlayer-proto/src/lib.rs";
 const SERVER_TOML = "crates/hyprlayer-server/Cargo.toml";
-const MIN_FILE = "src-tauri/src/server_version.rs";
-const APP_SRC = "src-tauri/src";
+const MIN_FILE = "crates/hyprlayer-client/src/server_version.rs";
+const APP_ROOTS = ["src-tauri/src", "crates/hyprlayer-client/src"];
 
 const git = (...args) =>
   execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
@@ -109,7 +109,7 @@ function appCalls(table) {
   const byVariant = new Map([...table].map(([method, { variant }]) => [variant, method]));
   const calls = new Map();
   const gated = new Map();
-  for (const file of rustFiles(APP_SRC)) {
+  for (const file of APP_ROOTS.flatMap(rustFiles)) {
     const raw = read(file);
     const lines = raw.split("\n");
     // Stripping keeps every newline, so a match's line is the same in both.

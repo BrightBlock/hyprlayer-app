@@ -7,7 +7,7 @@ docker = { max-threads = 4 }
 bindings = { max-threads = 1 }
 
 [[profile.default.overrides]]
-filter = 'binary_id(hyprlayer-e2e::remote_*) | test(=remote_server_memory) | binary_id(hyprlayer-app::ssh_sign_in)'
+filter = 'binary_id(hyprlayer-e2e::remote_*) | test(=remote_server_memory) | binary_id(hyprlayer-client::ssh_sign_in)'
 test-group = 'docker'
 # A cold emulated amd64 build takes many minutes.
 slow-timeout = { period = "120s", terminate-after = 30 }

@@ -64,15 +64,7 @@ pub async fn save_clipboard_image(
 
 fn clipboard_png(app: &AppHandle) -> Option<Vec<u8>> {
     let image = app.clipboard().read_image().ok()?;
-    let mut png = Vec::new();
-    let mut encoder = png::Encoder::new(&mut png, image.width(), image.height());
-    encoder.set_color(png::ColorType::Rgba);
-    encoder.set_depth(png::BitDepth::Eight);
-    encoder.set_compression(png::Compression::Fast);
-    let mut writer = encoder.write_header().ok()?;
-    writer.write_image_data(image.rgba()).ok()?;
-    writer.finish().ok()?;
-    Some(png)
+    hyprlayer_client::attachments::encode_png(image.width(), image.height(), image.rgba())
 }
 
 /// The read half of `save_attachment`, as base64 — carries an attachment's bytes back

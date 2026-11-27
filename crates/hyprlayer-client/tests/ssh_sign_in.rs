@@ -1,6 +1,6 @@
 //! Signing in to a host the way the desktop does: the real `ssh`, a
-//! password-only sshd on an x86_64 Linux host, this app's own binary as the
-//! askpass helper, and the relay. A responder stands in for the window.
+//! password-only sshd on an x86_64 Linux host, the crate's askpass helper bin,
+//! and the relay. A responder stands in for the window.
 #![cfg(unix)]
 
 use std::collections::HashSet;
@@ -12,10 +12,10 @@ use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use hyprlayer_app_lib::hosts::{Host, Target};
-use hyprlayer_app_lib::provision;
-use hyprlayer_app_lib::ssh::{Ssh, SshPrompt, SshPromptKind, SshSetup};
-use hyprlayer_app_lib::supervisor::{self, HostProbe, Outcome};
+use hyprlayer_client::hosts::{Host, Target};
+use hyprlayer_client::provision;
+use hyprlayer_client::ssh::{Ssh, SshPrompt, SshPromptKind, SshSetup};
+use hyprlayer_client::supervisor::{self, HostProbe, Outcome};
 use hyprlayer_e2e::containers::{HostOptions, Platform, RemoteHost};
 use hyprlayer_e2e::{json, Journey, Sandbox, Value};
 
@@ -36,7 +36,7 @@ enum Reply {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "needs Docker: cargo test -p hyprlayer-app --test ssh_sign_in -- --ignored, or the release gate"]
+#[ignore = "needs Docker: cargo test -p hyprlayer-client --test ssh_sign_in -- --ignored, or the release gate"]
 async fn ssh_sign_in() {
     let sandbox = Sandbox::new();
     capture_logs(&sandbox.logs.join("app.log"));
@@ -566,7 +566,7 @@ impl Desktop {
     fn setup(&self, socket_dir: &Path, prompt_timeout: Duration) -> SshSetup {
         SshSetup {
             program: self.program.clone(),
-            askpass: Some(PathBuf::from(env!("CARGO_BIN_EXE_Hyprlayer"))),
+            askpass: Some(PathBuf::from(env!("CARGO_BIN_EXE_hyprlayer-askpass"))),
             socket_dir: socket_dir.to_path_buf(),
             control_dir: Some(self.control.clone()),
             prompt_timeout,
