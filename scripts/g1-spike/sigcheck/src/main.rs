@@ -8,13 +8,20 @@ use minisign_verify::{PublicKey, Signature};
 use std::fs;
 
 fn b64s(s: &str) -> String {
-    String::from_utf8(base64::engine::general_purpose::STANDARD.decode(s.trim()).expect("b64")).expect("utf8")
+    String::from_utf8(
+        base64::engine::general_purpose::STANDARD
+            .decode(s.trim())
+            .expect("b64"),
+    )
+    .expect("utf8")
 }
 
 fn tauri_verify(data: &[u8], sig: &str, pubkey: &str) -> Result<(), String> {
     let public_key = PublicKey::decode(&b64s(pubkey)).map_err(|e| e.to_string())?;
     let signature = Signature::decode(&b64s(sig)).map_err(|e| e.to_string())?;
-    public_key.verify(data, &signature, true).map_err(|e| e.to_string())
+    public_key
+        .verify(data, &signature, true)
+        .map_err(|e| e.to_string())
 }
 
 fn main() {
@@ -27,10 +34,19 @@ fn main() {
         "sign" => {
             let key = fs::read_to_string(&a[1]).unwrap();
             let cfg = SigningConfig::new().private_key(key).password("");
-            println!("{}", cargo_packager::sign::sign_file(&cfg, &a[2]).unwrap().display());
+            println!(
+                "{}",
+                cargo_packager::sign::sign_file(&cfg, &a[2])
+                    .unwrap()
+                    .display()
+            );
         }
         "tauri-verify" => {
-            let r = tauri_verify(&fs::read(&a[1]).unwrap(), &fs::read_to_string(&a[2]).unwrap(), &fs::read_to_string(&a[3]).unwrap());
+            let r = tauri_verify(
+                &fs::read(&a[1]).unwrap(),
+                &fs::read_to_string(&a[2]).unwrap(),
+                &fs::read_to_string(&a[3]).unwrap(),
+            );
             println!("tauri-verify: {r:?}");
             std::process::exit(r.is_err() as i32);
         }

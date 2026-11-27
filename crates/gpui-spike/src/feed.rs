@@ -52,7 +52,9 @@ pub fn spawn(source: Source) -> UnboundedReceiver<Msg> {
                 });
                 let result = match source {
                     Source::Synthetic => synthetic(&tx).await,
-                    Source::Attach { socket, workstream } => attach(&tx, &socket, &workstream).await,
+                    Source::Attach { socket, workstream } => {
+                        attach(&tx, &socket, &workstream).await
+                    }
                     #[cfg(unix)]
                     Source::Host => host::run(&tx).await,
                     #[cfg(not(unix))]
@@ -79,12 +81,18 @@ async fn synthetic(tx: &UnboundedSender<Msg>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn attach(tx: &UnboundedSender<Msg>, socket: &std::path::Path, workstream: &str) -> anyhow::Result<()> {
+async fn attach(
+    tx: &UnboundedSender<Msg>,
+    socket: &std::path::Path,
+    workstream: &str,
+) -> anyhow::Result<()> {
     #[cfg(unix)]
     let stream = tokio::net::UnixStream::connect(socket).await?;
     #[cfg(not(unix))]
     let stream = tokio::net::windows::named_pipe::ClientOptions::new().open(socket)?;
-    let client = RpcClient::connect_announcing(stream, Features::ALL).await.map_err(|e| anyhow::anyhow!("{e}"))?;
+    let client = RpcClient::connect_announcing(stream, Features::ALL)
+        .await
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     tx.send(Msg::Status(format!(
         "connected, server {} (protocol {})",
         client.server_semver().unwrap_or("?"),
@@ -93,7 +101,11 @@ async fn attach(tx: &UnboundedSender<Msg>, socket: &std::path::Path, workstream:
     pump(tx, client, workstream).await
 }
 
-async fn pump(tx: &UnboundedSender<Msg>, client: std::sync::Arc<RpcClient>, workstream: &str) -> anyhow::Result<()> {
+async fn pump(
+    tx: &UnboundedSender<Msg>,
+    client: std::sync::Arc<RpcClient>,
+    workstream: &str,
+) -> anyhow::Result<()> {
     let (terminal, stream_id, mut events) = client
         .terminal_open_stream(workstream.to_string(), 100, 24)
         .await
@@ -102,7 +114,9 @@ async fn pump(tx: &UnboundedSender<Msg>, client: std::sync::Arc<RpcClient>, work
     let _ = client
         .terminal_write(
             terminal.clone(),
-            B64.encode("echo LIVE_TERMINAL_OK; ls -G /; printf '\\033[1;35mbold magenta\\033[0m\\n'\n"),
+            B64.encode(
+                "echo LIVE_TERMINAL_OK; ls -G /; printf '\\033[1;35mbold magenta\\033[0m\\n'\n",
+            ),
         )
         .await;
     while let Some(event) = events.recv().await {
@@ -138,19 +152,30 @@ mod host {
         }
         let exe = std::env::current_exe()?;
         let sibling = exe.with_file_name("hyprlayer-server");
-        anyhow::ensure!(sibling.exists(), "no hyprlayer-server next to {}", exe.display());
+        anyhow::ensure!(
+            sibling.exists(),
+            "no hyprlayer-server next to {}",
+            exe.display()
+        );
         Ok(sibling)
     }
 
     fn tagged<T: serde::Serialize>(v: &T, command: &str) -> serde_json::Value {
-        serde_json::to_value(v).ok().and_then(|mut v| v.get_mut(command).map(serde_json::Value::take)).unwrap_or_default()
+        serde_json::to_value(v)
+            .ok()
+            .and_then(|mut v| v.get_mut(command).map(serde_json::Value::take))
+            .unwrap_or_default()
     }
 
     fn git(dir: &std::path::Path, args: &[&str]) -> anyhow::Result<()> {
         let st = std::process::Command::new("git")
-            .arg("-C").arg(dir).args(args)
-            .env("GIT_AUTHOR_NAME", "spike").env("GIT_AUTHOR_EMAIL", "spike@example.com")
-            .env("GIT_COMMITTER_NAME", "spike").env("GIT_COMMITTER_EMAIL", "spike@example.com")
+            .arg("-C")
+            .arg(dir)
+            .args(args)
+            .env("GIT_AUTHOR_NAME", "spike")
+            .env("GIT_AUTHOR_EMAIL", "spike@example.com")
+            .env("GIT_COMMITTER_NAME", "spike")
+            .env("GIT_COMMITTER_EMAIL", "spike@example.com")
             .status()?;
         anyhow::ensure!(st.success(), "git {args:?} failed");
         Ok(())
@@ -159,7 +184,11 @@ mod host {
     pub async fn run(tx: &UnboundedSender<Msg>) -> anyhow::Result<()> {
         let root = std::env::temp_dir().join(format!("gpui-spike-{}", std::process::id()));
         let (home, cfg, data, logs, run) = (
-            root.join("home"), root.join("config"), root.join("data"), root.join("logs"), root.join("run"),
+            root.join("home"),
+            root.join("config"),
+            root.join("data"),
+            root.join("logs"),
+            root.join("run"),
         );
         for d in [&home, &cfg, &data, &logs, &run] {
             std::fs::create_dir_all(d)?;
@@ -171,23 +200,38 @@ mod host {
         git(&repo, &["add", "."])?;
         git(&repo, &["commit", "-q", "-m", "init"])?;
         let socket = if cfg!(target_os = "linux") {
-            run.join("hyprlayer").join(format!("{}.sock", hyprlayer_server::socket::profile_hash(&data)))
+            run.join("hyprlayer").join(format!(
+                "{}.sock",
+                hyprlayer_server::socket::profile_hash(&data)
+            ))
         } else {
             data.join("hyprlayer.sock")
         };
         let child = tokio::process::Command::new(server_bin()?)
             .arg("serve")
             .env_clear()
-            .env("HOME", &home).env("USER", "spike").env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin")
-            .env("SHELL", "/bin/sh").env("XDG_RUNTIME_DIR", &run)
-            .env("HYPRLAYER_APP_CONFIG_DIR", &cfg).env("HYPRLAYER_APP_DATA_DIR", &data).env("HYPRLAYER_APP_LOG_DIR", &logs)
+            .env("HOME", &home)
+            .env("USER", "spike")
+            .env("PATH", "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin")
+            .env("SHELL", "/bin/sh")
+            .env("XDG_RUNTIME_DIR", &run)
+            .env("HYPRLAYER_APP_CONFIG_DIR", &cfg)
+            .env("HYPRLAYER_APP_DATA_DIR", &data)
+            .env("HYPRLAYER_APP_LOG_DIR", &logs)
             .current_dir(&root)
-            .stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null())
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
             .kill_on_drop(true)
             .spawn()?;
-        HOSTED_PID.store(child.id().unwrap_or(0), std::sync::atomic::Ordering::Relaxed);
+        HOSTED_PID.store(
+            child.id().unwrap_or(0),
+            std::sync::atomic::Ordering::Relaxed,
+        );
         let _child = child;
-        tx.send(Msg::Status("starting hosted server on a throwaway profile".into()))?;
+        tx.send(Msg::Status(
+            "starting hosted server on a throwaway profile".into(),
+        ))?;
         let client = loop {
             match RpcClient::connect_socket(&socket).await {
                 Ok(_) => break (),
@@ -196,22 +240,60 @@ mod host {
         };
         let _ = client;
         let stream = tokio::net::UnixStream::connect(&socket).await?;
-        let client = RpcClient::connect_announcing(stream, Features::ALL).await.map_err(|e| anyhow::anyhow!("{e}"))?;
-        let probe = client.call(Request::ProbeDefaultThoughts {}).await.map_err(|e| anyhow::anyhow!("probe: {e:?}"))?;
+        let client = RpcClient::connect_announcing(stream, Features::ALL)
+            .await
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let probe = client
+            .call(Request::ProbeDefaultThoughts {})
+            .await
+            .map_err(|e| anyhow::anyhow!("probe: {e:?}"))?;
         let probe = tagged(&probe, "probe_default_thoughts");
-        let path = probe.pointer("/default_path").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        client.call(Request::InitThoughtsRepo { user: "spike".into(), source: ThoughtsSource::Create { path } })
-            .await.map_err(|e| anyhow::anyhow!("init_thoughts_repo: {e:?}"))?;
-        let project = client.call(Request::ImportProject {
-            path: repo.display().to_string(), branch: None, directory_name: None, thoughts_dir: None, profile: None, bootstrap_user: None,
-        }).await.map_err(|e| anyhow::anyhow!("import_project: {e:?}"))?;
+        let path = probe
+            .pointer("/default_path")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        client
+            .call(Request::InitThoughtsRepo {
+                user: "spike".into(),
+                source: ThoughtsSource::Create { path },
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("init_thoughts_repo: {e:?}"))?;
+        let project = client
+            .call(Request::ImportProject {
+                path: repo.display().to_string(),
+                branch: None,
+                directory_name: None,
+                thoughts_dir: None,
+                profile: None,
+                bootstrap_user: None,
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("import_project: {e:?}"))?;
         let project = tagged(&project, "import_project");
-        let project_path = project.pointer("/path").and_then(|v| v.as_str()).unwrap_or_default().to_string();
-        let view = client.call(Request::CreateWorkstream {
-            project_path, title: "spike".into(), base: None, mode: WorktreeMode::Isolated, branch: None, branch_prefix: None,
-        }).await.map_err(|e| anyhow::anyhow!("create_workstream: {e:?}"))?;
+        let project_path = project
+            .pointer("/path")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
+        let view = client
+            .call(Request::CreateWorkstream {
+                project_path,
+                title: "spike".into(),
+                base: None,
+                mode: WorktreeMode::Isolated,
+                branch: None,
+                branch_prefix: None,
+            })
+            .await
+            .map_err(|e| anyhow::anyhow!("create_workstream: {e:?}"))?;
         let view = tagged(&view, "create_workstream");
-        let id = view.pointer("/item/id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+        let id = view
+            .pointer("/item/id")
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string();
         super::pump(tx, client, &id).await
     }
 }

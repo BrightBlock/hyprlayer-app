@@ -6,8 +6,16 @@ use gpui::{
 };
 
 const FONT_SIZE: f32 = 13.0;
-const DEFAULT_FG: RgbColor = RgbColor { r: 0xd0, g: 0xd4, b: 0xda };
-const DEFAULT_BG: RgbColor = RgbColor { r: 0x10, g: 0x14, b: 0x18 };
+const DEFAULT_FG: RgbColor = RgbColor {
+    r: 0xd0,
+    g: 0xd4,
+    b: 0xda,
+};
+const DEFAULT_BG: RgbColor = RgbColor {
+    r: 0x10,
+    g: 0x14,
+    b: 0x18,
+};
 
 #[cfg(target_os = "macos")]
 pub const MONO: &str = "Menlo";
@@ -57,7 +65,9 @@ impl TermGrid {
 
     pub fn text(&self) -> String {
         let (c, r) = (self.term.cols().unwrap_or(1), self.term.rows().unwrap_or(1));
-        self.term.read_text_viewport((0, 0), (c - 1, u32::from(r) - 1), false).unwrap_or_default()
+        self.term
+            .read_text_viewport((0, 0), (c - 1, u32::from(r) - 1), false)
+            .unwrap_or_default()
     }
 
     fn color(&self, c: CellColor) -> RgbColor {
@@ -73,39 +83,55 @@ impl TermGrid {
         for y in 0..rows {
             let mut runs: Vec<Run> = Vec::new();
             let mut col = 0usize;
-            let _ = self.term.for_each_row_cell(RowAt::Viewport(y), |cell: CellRead<'_>| {
-                if cell.wide == CellWide::SpacerTail {
-                    col += 1;
-                    return;
-                }
-                let s = cell.style;
-                let (mut fg, mut bg) = (
-                    s.fg_color.map(|c| self.color(c)).unwrap_or(DEFAULT_FG),
-                    s.bg_color.map(|c| self.color(c)),
-                );
-                if s.inverse {
-                    let old_bg = bg.unwrap_or(DEFAULT_BG);
-                    bg = Some(fg);
-                    fg = old_bg;
-                }
-                let ch: String = if cell.graphemes.is_empty() || s.invisible {
-                    " ".into()
-                } else {
-                    cell.graphemes.iter().filter_map(|&c| char::from_u32(c)).collect()
-                };
-                let width = if cell.wide == CellWide::Wide { 2 } else { 1 };
-                match runs.last_mut() {
-                    Some(last) if last.fg == fg && last.bg == bg && last.bold == s.bold => {
-                        last.text.push_str(&ch);
-                        last.width += width;
+            let _ = self
+                .term
+                .for_each_row_cell(RowAt::Viewport(y), |cell: CellRead<'_>| {
+                    if cell.wide == CellWide::SpacerTail {
+                        col += 1;
+                        return;
                     }
-                    _ => runs.push(Run { text: ch, col, width, fg, bg, bold: s.bold }),
-                }
-                col += width;
-            });
+                    let s = cell.style;
+                    let (mut fg, mut bg) = (
+                        s.fg_color.map(|c| self.color(c)).unwrap_or(DEFAULT_FG),
+                        s.bg_color.map(|c| self.color(c)),
+                    );
+                    if s.inverse {
+                        let old_bg = bg.unwrap_or(DEFAULT_BG);
+                        bg = Some(fg);
+                        fg = old_bg;
+                    }
+                    let ch: String = if cell.graphemes.is_empty() || s.invisible {
+                        " ".into()
+                    } else {
+                        cell.graphemes
+                            .iter()
+                            .filter_map(|&c| char::from_u32(c))
+                            .collect()
+                    };
+                    let width = if cell.wide == CellWide::Wide { 2 } else { 1 };
+                    match runs.last_mut() {
+                        Some(last) if last.fg == fg && last.bg == bg && last.bold == s.bold => {
+                            last.text.push_str(&ch);
+                            last.width += width;
+                        }
+                        _ => runs.push(Run {
+                            text: ch,
+                            col,
+                            width,
+                            fg,
+                            bg,
+                            bold: s.bold,
+                        }),
+                    }
+                    col += width;
+                });
             out.push(runs);
         }
-        let cursor = match (self.term.cursor_visible(), self.term.cursor_x(), self.term.cursor_y()) {
+        let cursor = match (
+            self.term.cursor_visible(),
+            self.term.cursor_x(),
+            self.term.cursor_y(),
+        ) {
             (Ok(true), Ok(x), Ok(y)) => Some((x as usize, y as usize)),
             _ => None,
         };
@@ -114,7 +140,13 @@ impl TermGrid {
 }
 
 fn hsla(c: RgbColor) -> Hsla {
-    Rgba { r: c.r as f32 / 255.0, g: c.g as f32 / 255.0, b: c.b as f32 / 255.0, a: 1.0 }.into()
+    Rgba {
+        r: c.r as f32 / 255.0,
+        g: c.g as f32 / 255.0,
+        b: c.b as f32 / 255.0,
+        a: 1.0,
+    }
+    .into()
 }
 
 impl Render for TermGrid {
@@ -139,7 +171,10 @@ impl Render for TermGrid {
                             let left = bounds.origin.x + cell_w * run.col as f32;
                             if let Some(bg) = run.bg {
                                 window.paint_quad(fill(
-                                    Bounds::new(point(left, top), size(cell_w * run.width as f32, line_h)),
+                                    Bounds::new(
+                                        point(left, top),
+                                        size(cell_w * run.width as f32, line_h),
+                                    ),
                                     hsla(bg),
                                 ));
                             }
@@ -156,8 +191,20 @@ impl Render for TermGrid {
                                 underline: None,
                                 strikethrough: None,
                             };
-                            let line = window.text_system().shape_line(text, font_size, &[text_run], Some(cell_w));
-                            let _ = line.paint(point(left, top), line_h, TextAlign::Left, None, window, cx);
+                            let line = window.text_system().shape_line(
+                                text,
+                                font_size,
+                                &[text_run],
+                                Some(cell_w),
+                            );
+                            let _ = line.paint(
+                                point(left, top),
+                                line_h,
+                                TextAlign::Left,
+                                None,
+                                window,
+                                cx,
+                            );
                         }
                     }
                     if let Some((x, y)) = cursor {
@@ -165,7 +212,10 @@ impl Render for TermGrid {
                         c.a = 0.55;
                         window.paint_quad(fill(
                             Bounds::new(
-                                point(bounds.origin.x + cell_w * x as f32, bounds.origin.y + line_h * y as f32),
+                                point(
+                                    bounds.origin.x + cell_w * x as f32,
+                                    bounds.origin.y + line_h * y as f32,
+                                ),
                                 size(cell_w, line_h),
                             ),
                             c,
