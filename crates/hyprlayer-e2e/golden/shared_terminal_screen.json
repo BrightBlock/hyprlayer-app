@@ -14,6 +14,9 @@
         },
         {
           "evidence": {
+            "frame_screen_grids_match": true,
+            "frame_screen_history_matches": true,
+            "frame_screen_mismatched_cells": 0,
             "grids_match": true,
             "history_matches": true,
             "mismatched_cells": 0,
@@ -43,6 +46,9 @@
         },
         {
           "evidence": {
+            "frame_screen_grids_match": true,
+            "frame_screen_history_matches": true,
+            "frame_screen_mismatched_cells": 0,
             "grids_match": true,
             "history_matches": true,
             "mismatched_cells": 0,
@@ -67,6 +73,9 @@
         },
         {
           "evidence": {
+            "frame_screen_grids_match": true,
+            "frame_screen_history_matches": true,
+            "frame_screen_mismatched_cells": 0,
             "grids_match": true,
             "history_matches": true,
             "mismatched_cells": 0,
@@ -91,6 +100,9 @@
         },
         {
           "evidence": {
+            "frame_screen_grids_match": true,
+            "frame_screen_history_matches": true,
+            "frame_screen_mismatched_cells": 0,
             "grids_match": true,
             "history_matches": true,
             "mismatched_cells": 0,
@@ -121,6 +133,9 @@
         },
         {
           "evidence": {
+            "frame_screen_grids_match": true,
+            "frame_screen_history_matches": true,
+            "frame_screen_mismatched_cells": 0,
             "grids_match": true,
             "history_matches": true,
             "mismatched_cells": 0,
@@ -147,6 +162,9 @@
         },
         {
           "evidence": {
+            "frame_screen_grids_match": true,
+            "frame_screen_history_matches": true,
+            "frame_screen_mismatched_cells": 0,
             "grids_match": true,
             "history_matches": true,
             "mismatched_cells": 0,
@@ -171,6 +189,9 @@
         },
         {
           "evidence": {
+            "frame_screen_grids_match": true,
+            "frame_screen_history_matches": true,
+            "frame_screen_mismatched_cells": 0,
             "grids_match": true,
             "history_matches": true,
             "mismatched_cells": 0,
@@ -196,6 +217,9 @@
         },
         {
           "evidence": {
+            "frame_screen_grids_match": true,
+            "frame_screen_history_matches": true,
+            "frame_screen_mismatched_cells": 0,
             "grids_match": true,
             "history_matches": true,
             "mismatched_cells": 0,
@@ -211,6 +235,9 @@
       "guards": [
         {
           "evidence": {
+            "frame_screen_grids_match": true,
+            "frame_screen_history_matches": true,
+            "frame_screen_mismatched_cells": 0,
             "grids_match": true,
             "history_matches": true,
             "mismatched_cells": 0,
@@ -226,6 +253,9 @@
       "guards": [
         {
           "evidence": {
+            "frame_screen_grids_match": true,
+            "frame_screen_history_matches": true,
+            "frame_screen_mismatched_cells": 0,
             "grids_match": true,
             "history_matches": true,
             "mismatched_cells": 0,
@@ -242,6 +272,9 @@
       "guards": [
         {
           "evidence": {
+            "frame_screen_grids_match": true,
+            "frame_screen_history_matches": true,
+            "frame_screen_mismatched_cells": 0,
             "grids_match": true,
             "history_matches": true,
             "mismatched_cells": 0,
@@ -263,6 +296,10 @@
                 "cols": 60,
                 "settled": true,
                 "shows": {
+                  "frame_screen_grids_match": true,
+                  "frame_screen_history_known_lossy": true,
+                  "frame_screen_history_matches": false,
+                  "frame_screen_mismatched_cells": 0,
                   "grids_match": true,
                   "history_matches": true,
                   "mismatched_cells": 0,
@@ -273,6 +310,10 @@
                 "cols": 110,
                 "settled": true,
                 "shows": {
+                  "frame_screen_grids_match": true,
+                  "frame_screen_history_known_lossy": true,
+                  "frame_screen_history_matches": false,
+                  "frame_screen_mismatched_cells": 0,
                   "grids_match": true,
                   "history_matches": true,
                   "mismatched_cells": 0,
@@ -291,6 +332,10 @@
       "guards": [
         {
           "evidence": {
+            "frame_screen_grids_match": true,
+            "frame_screen_history_known_lossy": true,
+            "frame_screen_history_matches": false,
+            "frame_screen_mismatched_cells": 0,
             "grids_match": true,
             "history_kept": true,
             "history_matches": true,
@@ -309,12 +354,20 @@
         {
           "evidence": {
             "c": {
+              "frame_screen_grids_match": true,
+              "frame_screen_history_known_lossy": true,
+              "frame_screen_history_matches": false,
+              "frame_screen_mismatched_cells": 0,
               "grids_match": true,
               "history_matches": true,
               "mismatched_cells": 0,
               "raw_output_events": 0
             },
             "d": {
+              "frame_screen_grids_match": true,
+              "frame_screen_history_known_lossy": true,
+              "frame_screen_history_matches": false,
+              "frame_screen_mismatched_cells": 0,
               "grids_match": true,
               "history_matches": true,
               "mismatched_cells": 0,
@@ -334,12 +387,20 @@
         {
           "evidence": {
             "c": {
+              "frame_screen_grids_match": true,
+              "frame_screen_history_known_lossy": true,
+              "frame_screen_history_matches": true,
+              "frame_screen_mismatched_cells": 0,
               "grids_match": true,
               "history_matches": true,
               "mismatched_cells": 0,
               "raw_output_events": 0
             },
             "d": {
+              "frame_screen_grids_match": true,
+              "frame_screen_history_known_lossy": true,
+              "frame_screen_history_matches": true,
+              "frame_screen_mismatched_cells": 0,
               "grids_match": true,
               "history_matches": true,
               "mismatched_cells": 0,

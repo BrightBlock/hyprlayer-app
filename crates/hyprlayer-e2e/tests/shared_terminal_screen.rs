@@ -3,17 +3,21 @@
 //! which needs `node` and the repository's `pnpm install`). Every case compares their screens cell
 //! by cell. A raw tap, which renders and answers nothing, feeds a libghostty model the bytes the
 //! program wrote; frame desktops C and D must show what that model holds, cells and history.
+//! Each frame desktop also feeds a `FrameScreen` (`hyprlayer-client`), whose cells and history
+//! must equal the model's exactly.
 #![cfg(unix)]
 
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use base64::engine::general_purpose::STANDARD;
 use base64::Engine as _;
-use ghostty_vt::{CellColor, CellWide, RowAt, Terminal};
+use ghostty_vt::{CellColor, CellStyle, CellWide, RowAt, Terminal};
+use hyprlayer_client::terminal::{FrameScreen, ScreenCell};
 use hyprlayer_core::models::{Rgb, TerminalTheme};
 use hyprlayer_core::terminal::TerminalEvent;
 use hyprlayer_e2e::agent_stub::{install, SCREEN_TUI};
@@ -223,6 +227,7 @@ impl RawDesktop {
 #[derive(Clone)]
 struct Model(Arc<Mutex<Terminal>>);
 
+#[derive(Clone, PartialEq)]
 struct ModelCell {
     text: String,
     width: u8,
@@ -247,6 +252,35 @@ fn color(color: Option<CellColor>) -> String {
     }
 }
 
+fn model_cell(text: String, wide: CellWide, style: &CellStyle, linked: bool) -> ModelCell {
+    // xterm draws a linked cell underlined.
+    let flags = [
+        style.bold,
+        style.faint,
+        style.italic,
+        style.underlined || linked,
+        style.inverse,
+        style.strikethrough,
+        style.invisible,
+        style.blink,
+    ]
+    .iter()
+    .enumerate()
+    .filter(|(_, on)| **on)
+    .fold(0, |flags, (bit, _)| flags | 1 << bit);
+    ModelCell {
+        text,
+        width: match wide {
+            CellWide::SpacerTail => 0,
+            CellWide::Wide => 2,
+            _ => 1,
+        },
+        fg: color(style.fg_color),
+        bg: color(style.bg_color),
+        flags,
+    }
+}
+
 impl Model {
     fn new(cols: u16, rows: u16) -> Self {
         let terminal = Terminal::new(cols, rows, 2 * 1024 * 1024).expect("a libghostty terminal");
@@ -267,38 +301,17 @@ impl Model {
         let mut cells = Vec::new();
         let (_, continues) = terminal
             .for_each_row_cell(at, |cell| {
-                let style = &cell.style;
-                // xterm draws a linked cell underlined.
-                let link = cell.hyperlink.is_some();
-                let flags = [
-                    style.bold,
-                    style.faint,
-                    style.italic,
-                    style.underlined || link,
-                    style.inverse,
-                    style.strikethrough,
-                    style.invisible,
-                    style.blink,
-                ]
-                .iter()
-                .enumerate()
-                .filter(|(_, on)| **on)
-                .fold(0, |flags, (bit, _)| flags | 1 << bit);
-                cells.push(ModelCell {
-                    text: cell
-                        .graphemes
-                        .iter()
-                        .filter_map(|&c| char::from_u32(c))
-                        .collect(),
-                    width: match cell.wide {
-                        CellWide::SpacerTail => 0,
-                        CellWide::Wide => 2,
-                        _ => 1,
-                    },
-                    fg: color(style.fg_color),
-                    bg: color(style.bg_color),
-                    flags,
-                });
+                let text = cell
+                    .graphemes
+                    .iter()
+                    .filter_map(|&c| char::from_u32(c))
+                    .collect();
+                cells.push(model_cell(
+                    text,
+                    cell.wide,
+                    &cell.style,
+                    cell.hyperlink.is_some(),
+                ));
             })
             .expect("a model row");
         (cells, continues)
@@ -404,8 +417,98 @@ fn wraps_match(model: &Snapshot, view: &Value) -> bool {
         .eq(model.continues.iter().map(|c| Some(*c)))
 }
 
+/// How many cells and wrap flags `screen` holds differently from the model, whether its history
+/// ends as the model's does, and the first difference. Exact, but a blank cell is a space or
+/// empty alike: frames paint the spaces the program wrote.
+fn native_mismatched(model: &Snapshot, screen: &FrameScreen) -> (usize, bool, String) {
+    let all = usize::from(model.cols) * usize::from(model.rows);
+    let Ok(rows) = screen.rows() else {
+        return (all, false, "unreadable".into());
+    };
+    if screen.size().ok() != Some((model.cols, model.rows)) || rows.len() != model.grid.len() {
+        return (all, false, format!("size {:?}", screen.size().ok()));
+    }
+    let (mut bad, mut first) = (0, String::new());
+    for (y, ((cells, continues), (want, want_continues))) in rows
+        .iter()
+        .zip(model.grid.iter().zip(&model.continues))
+        .enumerate()
+    {
+        if continues != want_continues {
+            bad += 1;
+            first = format!("row {y} wrap {continues} want {want_continues}");
+        }
+        if cells.len() != want.len() {
+            bad += want.len();
+            continue;
+        }
+        for (x, (cell, want)) in cells.iter().zip(want).enumerate() {
+            let (mut got, mut want_cell) = (mapped(cell), want.clone());
+            for c in [&mut got, &mut want_cell] {
+                if c.text.is_empty() {
+                    c.text = " ".into();
+                }
+            }
+            if got != want_cell {
+                bad += 1;
+                first = format!("cell {x},{y}: {:?} want {:?}", got.text, want_cell.text);
+            }
+        }
+    }
+    // The text alone, tails aligned: a reflow moves where rows break, and blank rows come and go.
+    let squash = |lines: &[String]| -> Vec<char> {
+        lines
+            .iter()
+            .flat_map(|l| l.chars())
+            .filter(|c| !c.is_whitespace())
+            .collect()
+    };
+    let (history, model_history) = (
+        squash(&screen.history().unwrap_or_default()),
+        squash(&model.history),
+    );
+    let n = history.len().min(model_history.len());
+    let (held, kept) = (
+        &history[history.len() - n..],
+        &model_history[model_history.len() - n..],
+    );
+    let ends_alike = held == kept;
+    if !ends_alike {
+        let at = held.iter().zip(kept).position(|(g, w)| g != w).unwrap_or(0);
+        let (lo, hi) = (at.saturating_sub(20), (at + 40).min(n));
+        first = format!(
+            "history char {at}/{n}: client {:?} model {:?}",
+            held[lo..hi].iter().collect::<String>(),
+            kept[lo..hi].iter().collect::<String>()
+        );
+    }
+    (
+        bad,
+        ends_alike && (n > 0 || model_history.is_empty()),
+        first,
+    )
+}
+
+fn mapped(cell: &ScreenCell) -> ModelCell {
+    model_cell(cell.text.clone(), cell.wide, &cell.style, cell.linked)
+}
+
+/// This thread's CPU time, for work that doesn't await.
+fn thread_cpu() -> Duration {
+    let mut at = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
+    // SAFETY: a valid out pointer.
+    unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut at) };
+    Duration::new(at.tv_sec as u64, at.tv_nsec as u32)
+}
+
 #[derive(Clone)]
-struct Xterm(mpsc::UnboundedSender<(String, Option<oneshot::Sender<Value>>)>);
+struct Xterm(
+    mpsc::UnboundedSender<(String, Option<oneshot::Sender<Value>>)>,
+    Option<u32>,
+);
 
 impl Xterm {
     fn spawn() -> Self {
@@ -417,6 +520,7 @@ impl Xterm {
             .kill_on_drop(true)
             .spawn()
             .expect("`node` runs xterm/render.mjs (and `pnpm install` gives it @xterm/headless)");
+        let pid = child.id();
         let mut stdin = child.stdin.take().expect("node's stdin");
         let mut lines = BufReader::new(child.stdout.take().expect("node's stdout")).lines();
         let (tx, mut rx) = mpsc::unbounded_channel::<(String, Option<oneshot::Sender<Value>>)>();
@@ -436,7 +540,32 @@ impl Xterm {
                 }
             }
         });
-        Self(tx)
+        Self(tx, pid)
+    }
+
+    /// The node process's CPU time so far, read with `ps`.
+    fn cpu(&self) -> Duration {
+        let ps = std::process::Command::new("ps")
+            .args([
+                "-o",
+                "cputime=",
+                "-p",
+                &self.1.unwrap_or_default().to_string(),
+            ])
+            .output()
+            .ok();
+        // `[[dd-]hh:]mm:ss[.cc]`.
+        let text = ps.map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string());
+        let secs = text
+            .unwrap_or_default()
+            .split(':')
+            .try_fold(0.0, |acc, part| {
+                part.rsplit('-')
+                    .next()
+                    .and_then(|p| p.parse::<f64>().ok())
+                    .map(|n| acc * 60.0 + n)
+            });
+        Duration::from_secs_f64(secs.unwrap_or(0.0))
     }
 
     fn send(&self, command: Value) {
@@ -470,6 +599,11 @@ struct FrameDesktop {
     client: Arc<RpcClient>,
     terminal: String,
     xterm: Xterm,
+    screen: Arc<Mutex<FrameScreen>>,
+    /// Time spent writing frames into `screen`.
+    native_cpu: Arc<Mutex<Duration>>,
+    /// Set once this client is narrower than the history rows it was sent: it then lacks their text past its width.
+    narrowed: Arc<AtomicBool>,
     log: Arc<Mutex<FrameLog>>,
 }
 
@@ -479,6 +613,11 @@ impl FrameDesktop {
             client,
             terminal: terminal.to_string(),
             xterm: Xterm::spawn(),
+            screen: Arc::new(Mutex::new(
+                FrameScreen::new(80, 24).expect("a frame screen"),
+            )),
+            native_cpu: Arc::default(),
+            narrowed: Arc::default(),
             log: Arc::default(),
         }
     }
@@ -509,7 +648,8 @@ impl FrameDesktop {
                 }
                 match event {
                     TerminalEvent::Resized { cols, rows, .. } => {
-                        me.xterm.send(json!({ "resize": [cols, rows] }))
+                        me.xterm.send(json!({ "resize": [cols, rows] }));
+                        let _ = me.screen.lock().unwrap().resize(cols, rows);
                     }
                     TerminalEvent::Output {
                         data,
@@ -526,6 +666,9 @@ impl FrameDesktop {
                             log.paint_log.push((Instant::now(), paint));
                         }
                         me.xterm.send(json!({ "write": data }));
+                        let started = thread_cpu();
+                        me.screen.lock().unwrap().write(&bytes);
+                        *me.native_cpu.lock().unwrap() += thread_cpu() - started;
                         log.history = offset;
                         let client = me.client.clone();
                         tokio::spawn(async move {
@@ -603,14 +746,32 @@ impl FrameDesktop {
             let (snapshot, view) = (model.snapshot(), self.xterm.dump().await);
             let bad = mismatched(&snapshot, &view);
             let history = history_matches(&snapshot, &view);
-            if (bad == 0 && history) || Instant::now() >= deadline {
+            let (native_bad, native_history, native_first) =
+                native_mismatched(&snapshot, &self.screen.lock().unwrap());
+            let lossy = self.narrowed.load(Relaxed);
+            let done = bad == 0 && history && native_bad == 0 && (native_history || lossy);
+            if done || Instant::now() >= deadline {
                 let raw = self.log.lock().unwrap().raw;
-                return json!({
+                if !done {
+                    eprintln!("frame screen differs: {native_first}");
+                }
+                let evidence = json!({
                     "grids_match": bad == 0,
                     "mismatched_cells": bad,
                     "history_matches": history,
+                    "frame_screen_grids_match": native_bad == 0,
+                    "frame_screen_mismatched_cells": native_bad,
+                    "frame_screen_history_matches": native_history,
                     "raw_output_events": raw,
                 });
+                return if lossy {
+                    with(
+                        evidence,
+                        json!({ "frame_screen_history_known_lossy": true }),
+                    )
+                } else {
+                    evidence
+                };
             }
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
@@ -622,6 +783,9 @@ const SHOWS: &str = "the frame client shows the server's screen, cells and histo
 fn frames_ok(evidence: &Value) -> bool {
     evidence["grids_match"] == json!(true)
         && evidence["history_matches"] == json!(true)
+        && evidence["frame_screen_grids_match"] == json!(true)
+        && (evidence["frame_screen_history_matches"] == json!(true)
+            || evidence["frame_screen_history_known_lossy"] == json!(true))
         && evidence["raw_output_events"] == json!(0)
 }
 
@@ -949,6 +1113,7 @@ async fn shared_terminal_screen() {
     j.step("frames: C narrows to 60 columns and back, so both sides reflow that history");
     let mut reflowed = Vec::new();
     for (cols, rows) in [(60, 30), (110, 32)] {
+        c.narrowed.store(true, Relaxed);
         let paints = tap.paints();
         c.fit(cols, rows).await;
         let settled = tap.repainted(paints).await;
@@ -990,6 +1155,7 @@ async fn shared_terminal_screen() {
     d.theme(LIGHT_THEME).await;
     let (d_stream, _) = d.attach(None).await;
     d.fit(72, 40).await;
+    d.narrowed.store(true, Relaxed);
     c.fit(124, 40).await;
     c.take().await;
     let paints = tap.paints();
@@ -1100,7 +1266,41 @@ async fn shared_terminal_screen() {
     d.leave(d_stream).await;
     a.leave(a_stream).await;
     let _ = server.client().terminal_close(terminal).await;
+    let cpu = frame_cpu(&[&a, &b, &c, &d]).await;
+    j.note("frame_cpu", cpu.clone());
     j.finish();
+    save_frame_cpu(&cpu);
+}
+
+/// Report only: the CPU `FrameScreen` and xterm-headless spent on the same frames.
+async fn frame_cpu(desktops: &[&FrameDesktop]) -> Value {
+    let idle = Xterm::spawn();
+    idle.dump().await;
+    let idle = idle.cpu();
+    let native: Duration = desktops.iter().map(|d| *d.native_cpu.lock().unwrap()).sum();
+    // Includes the dumps the comparisons asked for, less node's start-up.
+    let xterm: Duration = desktops
+        .iter()
+        .map(|d| d.xterm.cpu().saturating_sub(idle))
+        .sum();
+    let frames: usize = desktops.iter().map(|d| d.log.lock().unwrap().frames).sum();
+    let bytes: usize = desktops.iter().map(|d| d.log.lock().unwrap().bytes).sum();
+    json!({
+        "desktops": desktops.len(),
+        "frames": frames,
+        "frame_bytes": bytes,
+        "frame_screen_cpu_ms": native.as_secs_f64() * 1000.0,
+        "xterm_headless_cpu_ms": xterm.as_secs_f64() * 1000.0,
+    })
+}
+
+/// The report scrubs times, so the figures go beside it.
+fn save_frame_cpu(cpu: &Value) {
+    let exe = std::env::current_exe().expect("the test executable");
+    let dir = exe.ancestors().nth(3).expect("the target dir");
+    let dir = dir.join("e2e/shared_terminal_screen");
+    let _ = std::fs::write(dir.join("frame_cpu.json"), format!("{cpu:#}\n"));
+    eprintln!("frame cpu: {cpu}");
 }
 
 #[cfg(target_os = "linux")]
