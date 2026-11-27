@@ -11,6 +11,10 @@ publish = false
 name = "hyprlayer-askpass"
 path = "src/bin/hyprlayer-askpass.rs"
 
+[[bin]]
+name = "transcript-replay"
+path = "src/bin/transcript-replay.rs"
+
 [dependencies]
 ghostty-vt.workspace = true
 hyprlayer-core = { workspace = true, features = ["specta"] }

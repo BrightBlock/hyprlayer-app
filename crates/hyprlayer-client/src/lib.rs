@@ -12,6 +12,7 @@ pub mod hosts;
 pub mod paths;
 pub mod provision;
 pub mod server_version;
+pub mod session;
 pub mod ssh;
 pub mod supervisor;
 pub mod terminal;
