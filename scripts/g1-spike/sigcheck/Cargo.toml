@@ -1,0 +1,10 @@
+[package]
+name = "sigcheck"
+version = "0.0.0"
+edition = "2021"
+[dependencies]
+cargo-packager = { version = "0.11.8", default-features = false, features = ["rustls-tls"] }
+cargo-packager-updater = { version = "0.2.3", default-features = false, features = ["rustls-tls"] }
+minisign-verify = "0.2"
+base64 = "0.22"
+[workspace]
