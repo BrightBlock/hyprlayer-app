@@ -1,0 +1,33 @@
+[package]
+name = "hyprlayer-client"
+description = "Hyprlayer desktop client logic with no UI: connection, supervisor, provisioning, hosts, ssh sign-in"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "hyprlayer-askpass"
+path = "src/bin/hyprlayer-askpass.rs"
+
+[dependencies]
+hyprlayer-core = { workspace = true, features = ["specta"] }
+hyprlayer-proto.workspace = true
+hyprlayer-server.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+tokio.workspace = true
+dirs.workspace = true
+gethostname = "1"
+specta = { version = "=2.0.0-rc.25", features = ["derive", "serde_json"] }
+log = "0.4"
+semver = "1"
+sha2 = "0.10"
+uuid = { version = "1.23.3", features = ["v4"] }
+png = "0.18"
+base64 = "0.22"
+
+[dev-dependencies]
+hyprlayer-e2e = { path = "../hyprlayer-e2e" }
+tempfile = "3"

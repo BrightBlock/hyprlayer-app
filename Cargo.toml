@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "src-tauri",
+    "crates/hyprlayer-client",
     "crates/hyprlayer-core",
     "crates/hyprlayer-models",
     "crates/hyprlayer-proto",
@@ -18,6 +19,7 @@ repository = "https://github.com/brightblock-ai/hyprlayer-app"
 
 [workspace.dependencies]
 ghostty-vt = { path = "crates/ghostty-vt" }
+hyprlayer-client = { path = "crates/hyprlayer-client" }
 hyprlayer-core = { path = "crates/hyprlayer-core" }
 hyprlayer-models = { path = "crates/hyprlayer-models" }
 hyprlayer-proto = { path = "crates/hyprlayer-proto" }

@@ -74,8 +74,7 @@ pub fn list_hosts(app: AppHandle) -> CmdResult<HostsFile> {
     Ok(hosts::load(&app_config_dir(&app)?))
 }
 
-/// Writes the whole file. There is one window and one writer, so there is
-/// nothing to merge (`BranchPrefixEditor`'s shape, plan Phase 1 §7).
+/// Merges into the file on disk: another desktop client may share it.
 #[tauri::command]
 #[specta::specta]
 pub fn save_hosts(app: AppHandle, file: HostsFile) -> CmdResult<()> {

@@ -34,6 +34,8 @@ hyprlayer-models → hyprlayer-core → hyprlayer-server → src-tauri (hyprlaye
 ```
 
 `hyprlayer-proto` holds the wire protocol; `hyprlayer-e2e` drives the real server.
+`hyprlayer-client` holds the desktop's UI-free client logic (supervisor, provisioning, hosts, ssh
+sign-in, paths); `src-tauri` re-exports it and keeps only the Tauri wiring.
 `docs/architecture/rust-runtime-library.md` is the runtime API reference.
 
 The frontend mirrors this: routes are wiring, features are content, `src/lib` and
@@ -76,7 +78,7 @@ RPC the app calls is missing or different at `server-v<MIN_SERVER_VERSION>`. Its
 fixtures run with `scripts/test-server-compat.sh`.
 
 **Errors.** `CoreError` converts into the error envelope on its own; app-level
-failures use the constructors in `src-tauri/src/error.rs`. The UI reads them with
+failures use the constructors in `crates/hyprlayer-client/src/error.rs`. The UI reads them with
 `errorMessage` / `errorRemedy`; a `remedy` of `None` renders no call-to-action.
 
 **Migrations.** `MIGRATIONS` in `crates/hyprlayer-core/src/store/migrations.rs` is
@@ -98,7 +100,7 @@ runs a prebuilt server instead of building one per test process (once per run un
 nextest; the gate points it at the sidecar build). The `--ignored` container
 tier runs a Linux host in Docker over the same `ssh … relay` the desktop uses; the
 desktop's own ssh sign-in (askpass prompts, shared connections) is
-`src-tauri/tests/ssh_sign_in.rs`, in the app package because its helper is the app binary.
+`crates/hyprlayer-client/tests/ssh_sign_in.rs`, driven by that crate's `hyprlayer-askpass` helper bin.
 Under nextest a container test outside the `docker` test group in `.config/nextest.toml`
 panics: that group caps how many share the Docker VM.
 Isolated tests sit beside their code (`mod tests`, `*.test.tsx`) and in

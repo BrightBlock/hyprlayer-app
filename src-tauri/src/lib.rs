@@ -1,17 +1,8 @@
-mod client;
-mod client_identity;
 pub mod commands;
-mod editors;
-pub mod error;
 mod events;
-pub mod hosts;
 mod logging;
-pub mod provision;
 mod runtime_events;
-mod server_version;
-pub mod ssh;
 mod state;
-pub mod supervisor;
 mod traffic_lights;
 mod webkit_env;
 mod webview_gestures;
@@ -30,6 +21,10 @@ use hyprlayer_server::events::{REVISIONS_IN_STREAM, TARGETED_EVENTS, TRANSCRIPT_
 use tauri::Emitter;
 use tauri::Manager;
 use tauri_specta::{collect_commands, collect_events, Builder, Event};
+
+pub use hyprlayer_client::{
+    client, client_identity, editors, error, hosts, provision, server_version, ssh, supervisor,
+};
 
 use crate::client_identity::ClientIdentity;
 use crate::state::AppState;
@@ -453,6 +448,7 @@ pub(crate) async fn attach_client(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     webkit_env::apply();
+    supervisor::set_webview_only_env(webkit_env::set_by_app());
     logging::install_panic_hook();
     let builder = specta_builder();
     // Bound before the builder so the identifier is readable: the profile id
@@ -534,7 +530,7 @@ pub fn run() {
             // Before any `attach_client`, which announces it.
             app.manage(client_identity::load_or_create(&app_config_dir));
             app.manage(commands::terminal::TerminalColors::default());
-            app.manage(commands::account::SignInFlight::default());
+            app.manage(hyprlayer_client::account::SignInFlight::default());
             let ssh = ssh::Ssh::new(ssh::SshSetup::for_app(&app_data_dir));
             forward_ssh_prompts(app.handle().clone(), &ssh);
             app.manage(ssh.clone());

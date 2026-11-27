@@ -888,7 +888,7 @@ fn reports_working(semver: Option<&str>) -> bool {
 
 /// Message and remedy as one string, for a `server_unavailable` detail (which
 /// carries no remedy of its own) and the launch log.
-pub(crate) fn detail_for(err: &AppError) -> String {
+pub fn detail_for(err: &AppError) -> String {
     match &err.remedy {
         Some(remedy) => format!("{}\n\n{remedy}", err.message),
         None => err.message.clone(),
@@ -937,6 +937,17 @@ impl StderrFile {
     }
 }
 
+static WEBVIEW_ONLY_ENV: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+
+/// Variables the shell set for its own webview; the server and its agents must not inherit them.
+pub fn set_webview_only_env(vars: Vec<&'static str>) {
+    let _ = WEBVIEW_ONLY_ENV.set(vars);
+}
+
+fn webview_only_env() -> &'static [&'static str] {
+    WEBVIEW_ONLY_ENV.get().map_or(&[], Vec::as_slice)
+}
+
 fn server_command(
     bin: &Path,
     app_config_dir: &Path,
@@ -982,7 +993,7 @@ fn spawn_detached(
         app_config_dir,
         app_data_dir,
         app_log_dir,
-        &crate::webkit_env::set_by_app(),
+        webview_only_env(),
     );
     let written = match stderr {
         Some((file, dir, start)) => {

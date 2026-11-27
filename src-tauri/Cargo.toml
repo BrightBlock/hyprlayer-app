@@ -19,6 +19,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+hyprlayer-client.workspace = true
 hyprlayer-core = { workspace = true, features = ["specta"] }
 hyprlayer-proto.workspace = true
 hyprlayer-server.workspace = true
@@ -62,5 +63,6 @@ gtk = { version = "0.18", features = ["v3_24"] }
 webkit2gtk-sys = "2.0"
 
 [dev-dependencies]
+tauri = { version = "2", features = ["test"] }
 hyprlayer-e2e = { path = "../crates/hyprlayer-e2e" }
 tempfile = "3"

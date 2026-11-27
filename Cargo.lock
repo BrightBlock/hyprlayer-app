@@ -2007,6 +2007,7 @@ dependencies = [
  "dirs 5.0.1",
  "gethostname",
  "gtk",
+ "hyprlayer-client",
  "hyprlayer-core",
  "hyprlayer-e2e",
  "hyprlayer-proto",
@@ -2041,6 +2042,29 @@ dependencies = [
  "uuid",
  "webkit2gtk-sys",
  "which",
+]
+
+[[package]]
+name = "hyprlayer-client"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "dirs 5.0.1",
+ "gethostname",
+ "hyprlayer-core",
+ "hyprlayer-e2e",
+ "hyprlayer-proto",
+ "hyprlayer-server",
+ "log",
+ "png 0.18.1",
+ "semver",
+ "serde",
+ "serde_json",
+ "sha2",
+ "specta",
+ "tempfile",
+ "tokio",
+ "uuid",
 ]
 
 [[package]]

@@ -86,7 +86,8 @@ struct Fixture {
 
 fn fixture() -> Fixture {
     let raw = std::fs::read_to_string(
-        Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/compat/v0_7/app-errors.json"),
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../crates/hyprlayer-client/tests/fixtures/compat/v0_7/app-errors.json"),
     )
     .expect("app-errors.json fixture is readable");
     serde_json::from_str(&raw).expect("app-errors.json is valid JSON")
