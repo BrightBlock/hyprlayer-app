@@ -230,14 +230,20 @@ fn selftest_run(cx: &mut App, window: gpui::AnyWindowHandle, spike: Entity<Spike
         std::thread::spawn(move || {
             let _ = ntx.send(notify::send("Hyprlayer spike", "gpui build gate"));
         });
-        cx.background_executor().timer(Duration::from_secs(5)).await;
-        let note = match nrx.try_recv() {
-            Ok(Ok(())) => "sent".to_string(),
-            Ok(Err(e)) => format!("error: {e}"),
-            Err(_) => "no result within 5s".to_string(),
-        };
+        let mut note = "no result within 20s".to_string();
+        for _ in 0..40 {
+            cx.background_executor().timer(Duration::from_millis(500)).await;
+            match nrx.try_recv() {
+                Ok(Ok(())) => { note = "sent".into(); break; }
+                Ok(Err(e)) => { note = format!("error: {e}"); break; }
+                Err(_) => {}
+            }
+        }
         report.insert("notification".into(), serde_json::json!(note));
         let _ = std::fs::write(out.join("report.json"), serde_json::to_string_pretty(&report).unwrap());
+        if let Some(hold) = std::env::var("HYPRLAYER_SPIKE_HOLD").ok().and_then(|v| v.parse::<u64>().ok()) {
+            cx.background_executor().timer(Duration::from_secs(hold)).await;
+        }
         cx.update(|cx| cx.quit());
     })
     .detach();
