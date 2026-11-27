@@ -15,6 +15,10 @@ path = "src/main.rs"
 name = "hyprlayer_app_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[features]
+# Perf harness hook (scripts/perf); off in every shipped build.
+perf-probe = []
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

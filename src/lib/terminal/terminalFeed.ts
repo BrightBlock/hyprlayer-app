@@ -3,6 +3,7 @@ import { Channel } from "@tauri-apps/api/core";
 import { commands, type TerminalEvent } from "@/lib/bindings";
 import { releaseChannels } from "./channelRelease";
 import { b64ToBytes } from "./terminalCodec";
+import { terminalFrame } from "../perfProbe";
 
 /** A full reset (RIS) that waits behind the output already queued, which `Terminal.reset()` does not. */
 const START_OVER = "\x1bc";
@@ -74,7 +75,10 @@ export class TerminalFeed {
       const seq = ev.frame;
       if (seq != null) {
         // The server starts a frame stream it can't resume over itself.
-        this.screen.writeFrame(bytes, () => void commands.terminalFrameAck(channel.id, seq));
+        this.screen.writeFrame(bytes, () => {
+          if (import.meta.env.VITE_PERF_PROBE) terminalFrame(bytes);
+          void commands.terminalFrameAck(channel.id, seq);
+        });
       } else {
         // Only a resume's first output can be a replay; a live stream's gap keeps writing, as it always has.
         if (first && from !== undefined && ev.offset !== from) this.screen.write(START_OVER);

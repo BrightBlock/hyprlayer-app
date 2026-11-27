@@ -160,6 +160,10 @@ ReactDOM.createRoot(document.getElementById("root") as HTMLElement, {
   </React.StrictMode>,
 );
 
+if (import.meta.env.VITE_PERF_PROBE) {
+  void import("./perfWiring").then((m) => m.startPerf());
+}
+
 {
   let revealed = false;
   const reveal = () => {

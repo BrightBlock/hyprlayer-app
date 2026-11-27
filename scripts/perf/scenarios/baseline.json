@@ -1,0 +1,17 @@
+{
+  "name": "baseline",
+  "version": 1,
+  "steps": [
+    { "do": "first_interactive" },
+    { "do": "open_transcript" },
+    { "do": "open_terminal" },
+    { "do": "settle", "secs": 60, "phase": "settled" },
+    { "do": "scroll", "secs": 10, "pxPerSec": 1500 },
+    { "do": "resize_drag", "secs": 10, "minWidth": 1100, "maxWidth": 1500, "height": 900 },
+    { "do": "token_stream", "secs": 10 },
+    { "do": "terminal", "name": "seq", "command": "seq 1 3000000" },
+    { "do": "terminal", "name": "cat", "command": "cat $BIGFILE" },
+    { "do": "echo_latency", "samples": 30 },
+    { "do": "soak", "secs": 600 }
+  ]
+}

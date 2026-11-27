@@ -1,0 +1,5 @@
+{
+  "name": "startup",
+  "version": 1,
+  "steps": [{ "do": "first_interactive" }]
+}
