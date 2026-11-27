@@ -147,6 +147,11 @@ restore_session() { :; }
 trap cleanup EXIT
 
 # One run: writes $OUT/<n>/report.json with the client's metrics plus the harness's.
+# Load average and the busiest processes, so a run taken under someone else's build can be flagged.
+note_load() {
+  { uptime; if [ "$(uname)" = Darwin ]; then ps -Ao pcpu,comm -r; else ps -eo pcpu,comm --sort=-pcpu; fi | head -8; } >"$1" 2>&1 || true
+}
+
 one_run() {
   local n="$1"
   local dir="$OUT/$n"
@@ -156,9 +161,11 @@ one_run() {
   log "run $n: fixture"
   start_fixture "$dir"
   reset_profile "$(fixture_field "$dir/fixture.json" appData)"
-  log "run $n: cold launch"
+  note_load "$dir/load-before.txt"
+  log "run $n: cold launch ($(cut -d, -f3- "$dir/load-before.txt" | head -1 | xargs))"
   launch_app "$dir" "$SCENARIO" "$dir/client.json" "$dir/fixture.json"
   wait_report "$dir/client.json" "${PERF_RUN_LIMIT:-2400}"
+  note_load "$dir/load-after.txt"
   kill_app
   log "run $n: warm launch"
   launch_app "$dir" "$STARTUP_SCENARIO" "$dir/warm.json" "$dir/fixture.json"
