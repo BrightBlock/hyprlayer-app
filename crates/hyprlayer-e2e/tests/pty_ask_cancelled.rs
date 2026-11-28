@@ -1,6 +1,6 @@
 //! A spawner's `stop_agent` cancels its PTY agent's question or permission prompt. claude fires no
 //! hook for that, so only the screen shows the agent idle again, and it takes messages once more.
-//! A prompt still on screen keeps refusing them.
+//! A prompt still on screen keeps refusing them, and an answered question stops blocking at once.
 //!
 //! The caller is `goal_stub`'s claude stand-in driven through `hyprlayer-server mcp`; its PTY
 //! child is `agent_stub`'s PTY claude.
@@ -104,6 +104,38 @@ async fn pty_ask_cancelled() {
             json!({ "sent": tool_text(&sent), "typed": typed }),
         );
     }
+
+    j.step("an answered question reads working, not asking");
+    type_line(&c, &term, "question-ask").await;
+    let opened = reaches(&c, &ws, &term, "awaiting_permission").await;
+    type_line(&c, &term, "answer").await;
+    let working = reaches(&c, &ws, &term, "working").await;
+    let sent = mcp
+        .call(
+            "message_agent",
+            json!({ "terminal_id": term, "text": "E2E_AFTER_ANSWER" }),
+        )
+        .await;
+    j.guard(
+        "after its PermissionRequest and its answer's PostToolUse, more tool hooks read working and a message goes",
+        opened && working && !tool_failed(&sent),
+        json!({ "opened": opened, "state": pty_state(&c, &ws, &term).await, "sent": tool_text(&sent) }),
+    );
+
+    j.step("two asks with one key need two answers");
+    type_line(&c, &term, "ask").await;
+    type_line(&c, &term, "ask").await;
+    let opened = reaches(&c, &ws, &term, "awaiting_permission").await;
+    type_line(&c, &term, "ran").await;
+    tokio::time::sleep(PAST_SETTLE).await;
+    let after_one = pty_state(&c, &ws, &term).await;
+    type_line(&c, &term, "ran").await;
+    let after_both = reaches(&c, &ws, &term, "working").await;
+    j.guard(
+        "the first answer leaves it asking, the second reads working",
+        opened && after_one.as_deref() == Some("awaiting_permission") && after_both,
+        json!({ "afterOne": after_one, "afterBoth": pty_state(&c, &ws, &term).await }),
+    );
 
     j.step("a question still on screen keeps refusing messages");
     type_line(&c, &term, "question").await;

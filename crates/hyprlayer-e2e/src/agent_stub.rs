@@ -25,7 +25,9 @@ const MCP_REPLY: Duration = Duration::from_secs(30);
 /// `--settings` names for its event, so a launch without injected hooks fires none. `SessionStart`
 /// fires at launch; stdin lines: `work` (prompt, Bash tool, `Stop` replying `done: work`), `hold`
 /// (`UserPromptSubmit` alone, so it stays working), `ask` (`PermissionRequest` for `rm -rf build`),
-/// `question` (`AskUserQuestion`), `tools` (a parallel Read's `PreToolUse` and `PostToolUse` alone),
+/// `question` (`AskUserQuestion`), `question-ask` (its `PreToolUse` then `PermissionRequest`, as in
+/// default mode), `answer` (its `PostToolUse`, then a Read's hooks), `ran` (the asked Bash's
+/// `PostToolUse` alone, its prompt left up), `tools` (a parallel Read's `PreToolUse` and `PostToolUse` alone),
 /// `approve` (the asked tool's `PostToolUse`, then `Stop`), `clear` (`SessionEnd`, then
 /// `SessionStart` as `<id>-cleared`), `bad` (malformed, non-object and empty payloads), `fail`
 /// (`StopFailure` for an expired login, in place of `Stop`), `exit` (`SessionEnd`, then exit),
@@ -192,6 +194,14 @@ run_line() {
       hook PostToolUse "$(ev PostToolUse ',"tool_name":"Bash","tool_input":{"command":"rm -rf build"},"tool_response":{"stdout":""}')"
       hook Stop "$(ev Stop ',"last_assistant_message":"done: approve"')" ;;
     question) hook PreToolUse "$(ev PreToolUse ',"tool_name":"AskUserQuestion","tool_input":{"questions":[]}')" ;;
+    question-ask)
+      hook PreToolUse "$(ev PreToolUse ',"tool_name":"AskUserQuestion","tool_input":{"questions":[]}')"
+      hook PermissionRequest "$(ev PermissionRequest ',"tool_name":"AskUserQuestion","tool_input":{"questions":[]}')" ;;
+    answer)
+      hook PostToolUse "$(ev PostToolUse ',"tool_name":"AskUserQuestion","tool_input":{"questions":[]},"tool_response":{}')"
+      hook PreToolUse "$(ev PreToolUse ',"tool_name":"Read","tool_input":{"file_path":"README.md"}')"
+      hook PostToolUse "$(ev PostToolUse ',"tool_name":"Read","tool_input":{"file_path":"README.md"},"tool_response":{}')" ;;
+    ran) hook PostToolUse "$(ev PostToolUse ',"tool_name":"Bash","tool_input":{"command":"rm -rf build"},"tool_response":{"stdout":""}')" ;;
     clear)
       hook SessionEnd "$(ev SessionEnd ',"reason":"clear"')"
       sid="$sid-cleared"
@@ -239,9 +249,10 @@ if [ -z "$tui" ]; then
     run_line "$line"
     case "$line" in
       ask) open=1; printf '\033[2J\033[H Bash command\n   rm -rf build\n\n Do you want to proceed?\n \342\235\257 1. Yes\n   2. No\n\n Esc to cancel \302\267 Tab to amend\n' ;;
-      question) open=1; printf '\033[2J\033[H Which one?\n \342\235\257 1. This\n   2. That\n\n Enter to select \302\267 Esc to cancel\n' ;;
+      question|question-ask) open=1; printf '\033[2J\033[H Which one?\n \342\235\257 1. This\n   2. That\n\n Enter to select \302\267 Esc to cancel\n' ;;
       picker) printf '\033[2J\033[H   Select model\n   \342\235\257 1.  Default (recommended)   Sonnet 5.5\n\n   Enter to set as default \302\267 s to use this session only \302\267 Esc to cancel\n' ;;
       tools) ;;
+      ran) open=1 ;;
       *) box ;;
     esac
   done
