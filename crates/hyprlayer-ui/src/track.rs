@@ -27,7 +27,7 @@ impl Tracker {
     }
 }
 
-/// `el` must be positioned (`relative` or `absolute`): the probe fills it. Clipped-out parts
+/// `el` must be positioned (`relative` or `absolute`): the probe fills its padding box. Clipped-out parts
 /// are not recorded, so a row scrolled out of its list is absent.
 pub fn tracked<E: ParentElement + Styled>(id: impl Into<SharedString>, el: E) -> E {
     let id = id.into();
@@ -42,6 +42,6 @@ pub fn tracked<E: ParentElement + Styled>(id: impl Into<SharedString>, el: E) ->
             |_, _, _, _| {},
         )
         .absolute()
-        .size_full(),
+        .inset_0(),
     )
 }
