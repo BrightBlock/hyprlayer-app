@@ -1,11 +1,13 @@
 ---
 name: verify-hyprlayer
-description: Launch, health-check and drive the Hyprlayer desktop app (Tauri webview over the MCP bridge) to prove a frontend or backend change at the real UI, with screenshots and side-effect evidence. Use whenever a change needs verifying in the running app, not just tests.
+description: Launch, health-check and drive the Hyprlayer desktop app (Tauri webview over the MCP bridge, or the GPUI client hyprlayer-native over its drive bridge) to prove a frontend or backend change at the real UI, with screenshots and side-effect evidence. Use whenever a change needs verifying in the running app, not just tests.
 ---
 
 # Verify Hyprlayer in the running app
 
 The surface is the Tauri desktop app's webview. Only a debug `tauri dev` build is drivable: `tauri-plugin-mcp-bridge` is compiled out of release builds. The server (`hyprlayer-server`) runs as a separate process the app spawns. Other surfaces (the `hyprlayer-server` CLI, remote hosts over ssh) are covered by `crates/hyprlayer-e2e`, not this skill.
+
+The GPUI client is driven differently: see [The GPUI client](#the-gpui-client-hyprlayer-native).
 
 Helper: `.claude/skills/verify-hyprlayer/verify.sh launch isolated|shared|attach <app-data-dir> | doctor <run-dir> | cleanup <run-dir>`. Run it from the repo root. It runs on macOS and Linux.
 
@@ -113,6 +115,57 @@ Write everything to the `EVIDENCE` dir from `<run-dir>/run.env`, which is `targe
 .claude/skills/verify-hyprlayer/verify.sh cleanup <run-dir>
 ```
 It kills only the process tree under the recorded pnpm pid. For isolated and attach runs it stops that profile's own server (servers outlive the app by design; an attach run has none) and removes the identifier's config, data and log dirs. It also deletes the run dir, including the seed. It copies `dev.log` into the evidence dir first, and evidence is never removed. Run it after every failed iteration too. Afterwards nothing should listen on the Vite port (`lsof -nP -iTCP:<port> -sTCP:LISTEN`, or `ss -ltn` on Linux). Never `pkill Hyprlayer` or free port 1430: that kills the user's app.
+
+## The GPUI client (`hyprlayer-native`)
+
+A debug build serves a drive bridge: newline JSON on a Unix socket, with the ops in ADR-0013 ("Drive bridge"). There is no MCP server and no `verify.sh` mode for it.
+
+Never run it bare. Its default profile is `.dev`, and its supervisor replaces a `.dev` server built from another tree. Always pass `--profile-dir`, and `--attach` to a server you started. The binary ignores `HYPRLAYER_APP_*_DIR`, but a server you start by hand reads them, so set all three. Keep the run dir under `$TMPDIR`: a socket path over ~104 bytes fails to bind.
+
+```bash
+node scripts/build-server-sidecar.mjs --debug
+cargo build -p hyprlayer-desktop -p hyprlayer-server
+R=$(mktemp -d "${TMPDIR:-/tmp}/hl-native-XXXX"); mkdir -p $R/home $R/tmp $R/srv/config $R/srv/data $R/srv/logs
+# Starts the server and waits until it listens: it records its socket in .server-socket on bind.
+serve() { rm -f $R/srv/data/.server-socket
+  env -i HOME=$R/home PATH=/usr/bin:/bin TMPDIR=$R/tmp USER=verify \
+  HYPRLAYER_APP_CONFIG_DIR=$R/srv/config HYPRLAYER_APP_DATA_DIR=$R/srv/data HYPRLAYER_APP_LOG_DIR=$R/srv/logs \
+  target/debug/hyprlayer-server serve 2> $R/srv/stderr.log & echo $! > $R/server.pid
+  for _ in $(seq 1 120); do [ -S "$(cat $R/srv/data/.server-socket 2>/dev/null)" ] && return; sleep 0.5; done; echo "server did not listen"; }
+serve
+target/debug/hyprlayer-native --identifier ai.brightblock.hyprlayer.verify-native --profile-dir $R/client --attach $R/srv/data 2> $R/client.log &
+echo $! > $R/client.pid
+drive() { python3 -I - "$R/client/data" "$@" <<'EOF'
+import socket, sys
+s = socket.socket(socket.AF_UNIX); s.settimeout(30)
+s.connect(open(sys.argv[1] + "/native-drive-socket").read().strip())
+f = s.makefile("rw")
+for op in sys.argv[2:]:
+    f.write(op + "\n"); f.flush(); print(f.readline().strip())
+EOF
+}
+until [ -f $R/client/data/native-drive-socket ]; do sleep 0.5; done
+drive '{"op":"state"}' '{"op":"ids"}'
+```
+
+- Tracked ids: `projects`, `workstreams`, `sessions`, a row as `projects:<path>`, `workstreams:<id>` or `sessions:<id>`, `status`, and on the recovery screen `recovery`, `recovery-title`, `recovery-message`, `recovery-remedy` and `recovery-retry`. A list in `state` is `null` unless it was read on the live connection.
+- Server restart: `kill -9 $(cat $R/server.pid)`. `state` shows `lost` and `painted` lists `recovery`. Run `serve` again. The client retries 1, 2, 5 and 15 s after the drop, then every 30 s, so `state` turns `connected` within 30 s, with `connects` risen and the lists back. `drive '{"op":"click","id":"recovery-retry"}'` retries at once. The server also stops on its own when its last client leaves and no `claude` is installed, so restart it after quitting the client.
+- `drive '{"op":"quit"}'` quits cleanly: it saves `$R/client/config/native-window.json` and ends any ssh relay. Then stop the server by its pid and `rm -rf $R`.
+- A second launch with the same `--profile-dir` exits and brings the first window forward.
+- macOS: an occluded or minimised window does not paint, so `painted` keeps the last frame. Launch the same command again to bring it forward. `capture` needs Screen Recording for the app; without it the reply is `could not create image from window`.
+- macOS notifications: the bare binary answers `notify` with `no bundle identifier`. To test one, bundle it, then accept the permission prompt on the first `notify`:
+  ```bash
+  A=$R/HyprlayerNative.app/Contents; mkdir -p $A/MacOS
+  cp target/debug/hyprlayer-native target/debug/hyprlayer-server $A/MacOS/
+  plutil -create xml1 $A/Info.plist
+  plutil -insert CFBundleIdentifier -string ai.brightblock.hyprlayer.verify-native $A/Info.plist
+  plutil -insert CFBundleExecutable -string hyprlayer-native $A/Info.plist
+  plutil -insert CFBundleName -string HyprlayerNative $A/Info.plist
+  codesign -s - --force $R/HyprlayerNative.app
+  $A/MacOS/hyprlayer-native --identifier ai.brightblock.hyprlayer.verify-native --profile-dir $R/client --attach $R/srv/data &
+  ```
+- Linux (Hyprland): a throwaway identifier's window class is `Hyprlayer-Debug`, so the `hlverify` rule above routes it. `.dev` is `Hyprlayer-Dev` and the release is `Hyprlayer`. `capture` runs `grim -g` on the geometry `hyprctl clients -j` gives for the app's pid. A copy check needs `{"op":"key","keystroke":"ctrl-c","mode":"compositor"}`, because an in-app key has no input serial. Both need `HYPRLAND_INSTANCE_SIGNATURE` and `WAYLAND_DISPLAY` in the app's environment.
+- The repeatable version of these checks is `cargo test -p hyprlayer-e2e --features gpui --test gpui_skeleton`.
 
 ## Gotchas
 
