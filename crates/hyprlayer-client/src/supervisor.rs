@@ -425,14 +425,54 @@ pub async fn connect_remote(host: &Host, app_data_dir: &Path, ssh: &Ssh) -> Outc
 /// The `ssh … relay` child and what it has written to stderr, which is where
 /// both ssh and the remote relay say why a connection ended.
 struct Relay {
+    pid: Option<RelayPid>,
     child: Child,
     stderr: Arc<Mutex<String>>,
     drained: JoinHandle<()>,
 }
 
+static RELAY_PIDS: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+
+fn relay_pids() -> std::sync::MutexGuard<'static, Vec<u32>> {
+    RELAY_PIDS.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// A live relay's pid, listed for `stop_relays` until the child is reaped or dropped.
+struct RelayPid(u32);
+
+impl RelayPid {
+    fn new(pid: u32) -> Self {
+        relay_pids().push(pid);
+        Self(pid)
+    }
+}
+
+impl Drop for RelayPid {
+    fn drop(&mut self) {
+        relay_pids().retain(|&p| p != self.0);
+    }
+}
+
+/// Ends the ssh relays this client holds. A caller that exits without running destructors
+/// (GPUI's `cx.quit()`) leaves them to `kill_on_drop`, which never fires. The local server is
+/// not here: it is a deliberate orphan shared with other clients (ADR-0009).
+pub fn stop_relays() {
+    for pid in relay_pids().drain(..) {
+        #[cfg(unix)]
+        let _ = std::process::Command::new("kill")
+            .arg(pid.to_string())
+            .status();
+        #[cfg(windows)]
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/F"])
+            .status();
+    }
+}
+
 impl Relay {
     async fn watch(mut self, host: String) {
         let status = self.child.wait().await;
+        self.pid = None;
         let _ = tokio::time::timeout(DRAIN_TIMEOUT, self.drained).await;
         let said = self
             .stderr
@@ -533,6 +573,7 @@ async fn ssh_relay_connect(
         Ok(client) => Ok((
             client,
             Relay {
+                pid: child.id().map(RelayPid::new),
                 child,
                 stderr: tail,
                 drained,

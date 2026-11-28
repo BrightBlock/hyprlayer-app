@@ -12,7 +12,7 @@ pub const MAX_DEFAULT_W: f64 = 2560.0;
 pub const MAX_DEFAULT_H: f64 = 1600.0;
 pub const MAX_WORK_FRACTION: f64 = 0.94;
 
-#[derive(Debug, Clone, Copy, Default, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, serde::Deserialize, serde::Serialize)]
 #[serde(default)]
 pub struct SavedWindow {
     pub width: u32,
