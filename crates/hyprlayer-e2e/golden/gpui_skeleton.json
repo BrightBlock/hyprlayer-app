@@ -1,0 +1,174 @@
+{
+  "scenario": "gpui_skeleton",
+  "steps": [
+    {
+      "step": "the desktop attaches and lists the imported project",
+      "guards": [
+        {
+          "guard": "it attaches to the running server through hyprlayer-client",
+          "ok": true,
+          "evidence": {
+            "connection": {
+              "state": "connected",
+              "outdated": false
+            }
+          }
+        },
+        {
+          "guard": "the server answered the announce",
+          "ok": true,
+          "evidence": {
+            "transcriptSync": true
+          }
+        },
+        {
+          "guard": "the project is listed",
+          "ok": true,
+          "evidence": {
+            "projects": [
+              {
+                "key": "$SANDBOX/home/code/demo",
+                "label": "demo"
+              }
+            ]
+          }
+        },
+        {
+          "guard": "its row is painted",
+          "ok": true,
+          "evidence": {
+            "row": "projects:$SANDBOX/home/code/demo"
+          }
+        }
+      ]
+    },
+    {
+      "step": "a WorkstreamsChanged re-reads the workstreams list",
+      "guards": [
+        {
+          "guard": "the new workstream is listed",
+          "ok": true,
+          "evidence": {
+            "workstreams": [
+              "GPUI refresh"
+            ]
+          }
+        },
+        {
+          "guard": "by a re-read the event asked for",
+          "ok": true,
+          "evidence": {}
+        },
+        {
+          "guard": "its row is painted",
+          "ok": true,
+          "evidence": {
+            "row": "workstreams:$WS"
+          }
+        }
+      ]
+    },
+    {
+      "step": "a gap in runtime events re-reads every list",
+      "guards": [
+        {
+          "guard": "the stalled link drops events, and the desktop hears the gap",
+          "ok": true,
+          "evidence": {
+            "flooded_with": "LeadQueueChanged, which no list listens to"
+          }
+        },
+        {
+          "guard": "every list is read again after it",
+          "ok": true,
+          "evidence": {}
+        },
+        {
+          "guard": "over the same connection",
+          "ok": true,
+          "evidence": {
+            "connection": {
+              "state": "connected",
+              "outdated": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "step": "the desktop shows recovery when its server is killed, then reconnects",
+      "guards": [
+        {
+          "guard": "the server is gone",
+          "ok": true,
+          "evidence": {}
+        },
+        {
+          "guard": "the recovery screen replaces the lists",
+          "ok": true,
+          "evidence": {
+            "state": "lost"
+          }
+        },
+        {
+          "guard": "no list from the lost connection is reported as current",
+          "ok": true,
+          "evidence": {
+            "lists": {
+              "projects": null,
+              "workstreams": null,
+              "sessions": null
+            }
+          }
+        },
+        {
+          "guard": "it reconnects on its own pacing",
+          "ok": true,
+          "evidence": {
+            "connection": {
+              "state": "connected",
+              "outdated": false
+            }
+          }
+        },
+        {
+          "guard": "the lists are read again on the new connection",
+          "ok": true,
+          "evidence": {
+            "projects": [
+              "$SANDBOX/home/code/demo"
+            ],
+            "workstreams": [
+              "GPUI refresh"
+            ]
+          }
+        },
+        {
+          "guard": "the recovery screen is gone",
+          "ok": true,
+          "evidence": {}
+        }
+      ]
+    },
+    {
+      "step": "Retry on the recovery screen reconnects without waiting for the pacer",
+      "guards": [
+        {
+          "guard": "the recovery screen shows Retry while the server is down",
+          "ok": true,
+          "evidence": {}
+        },
+        {
+          "guard": "the click reconnects, before the next paced retry was due",
+          "ok": true,
+          "evidence": {
+            "connection": {
+              "state": "connected",
+              "outdated": false
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
