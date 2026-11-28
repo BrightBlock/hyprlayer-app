@@ -79,6 +79,33 @@
       "guards": [
         {
           "evidence": {
+            "opened": true,
+            "sent": "\"sent\"",
+            "state": "working"
+          },
+          "guard": "after its PermissionRequest and its answer's PostToolUse, more tool hooks read working and a message goes",
+          "ok": true
+        }
+      ],
+      "step": "an answered question reads working, not asking"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "afterBoth": "working",
+            "afterOne": "awaiting_permission"
+          },
+          "guard": "the first answer leaves it asking, the second reads working",
+          "ok": true
+        }
+      ],
+      "step": "two asks with one key need two answers"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
             "refusal": "agent_control_denied: agent control refused this: that agent is asking its user something, and a message now would answer it",
             "state": "awaiting_question"
           },

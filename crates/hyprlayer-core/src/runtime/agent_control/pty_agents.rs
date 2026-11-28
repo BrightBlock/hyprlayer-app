@@ -992,7 +992,9 @@ fn fold(agent: &mut PtyAgent, asks: &mut Vec<ToolKey>, signal: &AgentSignal) {
         }
         "PermissionRequest" => {
             agent.state = PtyAgentState::AwaitingPermission;
-            asks.extend(tool());
+            // A question's own `PreToolUse` already holds its key, and only one `PostToolUse` follows.
+            let key = tool().filter(|key| key.0 != "AskUserQuestion" || !asks.contains(key));
+            asks.extend(key);
         }
         "Notification" if was_asking => {}
         "Notification" => match signal.notification_type.as_deref() {
