@@ -150,13 +150,15 @@ impl ScriptRegistry {
         }
     }
 
-    pub async fn clear_workstream(&self, ws: &str) {
-        if let Some(h) = self.runs.lock().await.remove(ws) {
-            h.session.kill();
+    pub async fn clear_workstream(&self, ws: &str) -> Option<Arc<PtySession>> {
+        let run = self.runs.lock().await.remove(ws).map(|h| h.session);
+        if let Some(session) = &run {
+            session.kill();
         }
         self.status.lock().await.retain(|(id, _), _| id != ws);
         self.outputs.lock().await.retain(|(id, _), _| id != ws);
         self.ports.lock().await.remove(ws);
+        run
     }
 }
 

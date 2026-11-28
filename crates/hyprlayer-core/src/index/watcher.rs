@@ -23,7 +23,25 @@ pub enum IndexEvent {
 type FsDebouncer = Debouncer<RecommendedWatcher, RecommendedCache>;
 
 pub struct WatchHandle {
-    _debouncer: Arc<Mutex<FsDebouncer>>,
+    debouncer: Arc<Mutex<FsDebouncer>>,
+    watched: Arc<Mutex<Watches>>,
+}
+
+impl WatchHandle {
+    /// Returns once the OS watches are closed; a drop only asks the watcher thread to close them,
+    /// and Windows refuses to rename a directory while one is open.
+    pub fn release(self) {
+        let mut watched = self.watched.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut debouncer = self
+            .debouncer
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        for (path, _) in watched.drain(..) {
+            let _ = debouncer.unwatch(&path);
+        }
+        // The watcher thread answers this after the unwatches queued ahead of it.
+        let _ = debouncer.configure(notify::Config::default());
+    }
 }
 
 impl std::fmt::Debug for WatchHandle {
@@ -65,7 +83,8 @@ pub fn watch_roots(
     }
 
     Ok(WatchHandle {
-        _debouncer: Arc::new(Mutex::new(debouncer)),
+        debouncer: Arc::new(Mutex::new(debouncer)),
+        watched: Arc::default(),
     })
 }
 
@@ -105,7 +124,8 @@ pub fn watch_worktree(
     // The handler adds watches through the debouncer that owns it; a strong ref would be a cycle.
     let slot: Arc<OnceLock<Weak<Mutex<FsDebouncer>>>> = Arc::default();
     let own = slot.clone();
-    let mut watched = plan.clone();
+    let watched = Arc::new(Mutex::new(plan.clone()));
+    let handler_watched = watched.clone();
     let mut debouncer = new_debouncer(
         Duration::from_millis(300),
         None,
@@ -116,6 +136,9 @@ pub fn watch_worktree(
             if let (Some(repo), Some(debouncer)) =
                 (repo.as_ref(), own.get().and_then(Weak::upgrade))
             {
+                let mut watched = handler_watched
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner);
                 follow_tracked(
                     &events,
                     repo,
@@ -139,9 +162,7 @@ pub fn watch_worktree(
     apply_plan(&mut debouncer, plan)?;
     let debouncer = Arc::new(Mutex::new(debouncer));
     let _ = slot.set(Arc::downgrade(&debouncer));
-    Ok(WatchHandle {
-        _debouncer: debouncer,
-    })
+    Ok(WatchHandle { debouncer, watched })
 }
 
 fn follow_tracked(
