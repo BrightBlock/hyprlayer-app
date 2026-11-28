@@ -4,6 +4,7 @@ members = [
     "src-tauri",
     "crates/hyprlayer-client",
     "crates/hyprlayer-ui",
+    "crates/hyprlayer-desktop",
     "crates/hyprlayer-core",
     "crates/hyprlayer-models",
     "crates/hyprlayer-proto",
