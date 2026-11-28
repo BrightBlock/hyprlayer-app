@@ -5,15 +5,35 @@ use hyprlayer_core::claude::{ExitOutcome, PermissionMode, SessionEvent};
 use hyprlayer_core::codex::{CodexDriver, CodexPosture, CollabMode, SpawnConfig};
 use hyprlayer_models::session::QuestionAnswers;
 
-fn spawn_config(bin: std::path::PathBuf, permission_mode: PermissionMode) -> SpawnConfig {
+/// `HYPRLAYER_CODEX_MODEL`, else the account's first listed model, else `gpt-5.4`.
+async fn smoke_model(bin: &std::path::Path) -> String {
+    static MODEL: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+    MODEL
+        .get_or_init(|| async {
+            if let Ok(model) = std::env::var("HYPRLAYER_CODEX_MODEL") {
+                return model;
+            }
+            let path = std::env::var_os("PATH").unwrap_or_default();
+            hyprlayer_core::codex::probe::probe(bin, &path)
+                .await
+                .ok()
+                .and_then(|p| p.models.into_iter().next())
+                .map_or_else(|| "gpt-5.4".into(), |m| m.id)
+        })
+        .await
+        .clone()
+}
+
+async fn spawn_config(bin: std::path::PathBuf, permission_mode: PermissionMode) -> SpawnConfig {
     SpawnConfig {
         ephemeral: true,
-        ..persisted_config(bin, permission_mode)
+        ..persisted_config(bin, permission_mode).await
     }
 }
 
-fn persisted_config(bin: std::path::PathBuf, permission_mode: PermissionMode) -> SpawnConfig {
+async fn persisted_config(bin: std::path::PathBuf, permission_mode: PermissionMode) -> SpawnConfig {
     SpawnConfig {
+        model: Some(smoke_model(&bin).await),
         codex_bin: bin,
         cwd: std::env::temp_dir(),
         posture: CodexPosture::from_permission_mode(permission_mode),
@@ -21,7 +41,6 @@ fn persisted_config(bin: std::path::PathBuf, permission_mode: PermissionMode) ->
         add_dirs: vec![],
         skill_roots: vec![],
         resume: None,
-        model: None,
         effort: None,
         ephemeral: false,
         env: std::env::vars().collect(),
@@ -31,13 +50,13 @@ fn persisted_config(bin: std::path::PathBuf, permission_mode: PermissionMode) ->
 }
 
 #[tokio::test]
-#[ignore = "requires a logged-in codex; makes a real API call"]
+#[ignore = "requires a logged-in codex; makes a real API call; HYPRLAYER_CODEX_MODEL overrides the model"]
 async fn drives_a_real_no_tool_turn_to_completion() {
     let codex = which::which("codex").expect("codex on PATH");
+    let expected_model = smoke_model(&codex).await;
     let (driver, mut events) = CodexDriver::spawn(SpawnConfig {
-        model: Some("gpt-5.4".into()),
         effort: Some("low".into()),
-        ..spawn_config(codex, PermissionMode::Plan)
+        ..spawn_config(codex, PermissionMode::Plan).await
     })
     .await
     .expect("spawn codex app-server");
@@ -53,7 +72,7 @@ async fn drives_a_real_no_tool_turn_to_completion() {
                 !provider_session_id.is_empty(),
                 "codex should mint a thread id"
             );
-            assert_eq!(model.as_deref(), Some("gpt-5.4"));
+            assert_eq!(model.as_deref(), Some(expected_model.as_str()));
             provider_session_id
         }
         other => panic!("expected Init first, got {other:?}"),
@@ -125,11 +144,11 @@ async fn drives_a_real_no_tool_turn_to_completion() {
 }
 
 #[tokio::test]
-#[ignore = "requires a logged-in codex; makes a real API call"]
+#[ignore = "requires a logged-in codex; makes a real API call; HYPRLAYER_CODEX_MODEL overrides the model"]
 async fn tool_calls_and_usage_reach_the_transcript() {
     let codex = which::which("codex").expect("codex on PATH");
     let (driver, mut events) =
-        CodexDriver::spawn(spawn_config(codex, PermissionMode::BypassPermissions))
+        CodexDriver::spawn(spawn_config(codex, PermissionMode::BypassPermissions).await)
             .await
             .expect("spawn codex app-server");
 
@@ -204,12 +223,13 @@ async fn tool_calls_and_usage_reach_the_transcript() {
 }
 
 #[tokio::test]
-#[ignore = "requires a logged-in codex; makes real API calls"]
+#[ignore = "requires a logged-in codex; makes real API calls; HYPRLAYER_CODEX_MODEL overrides the model"]
 async fn rewind_to_ordinal_truncates_model_memory() {
     let codex = which::which("codex").expect("codex on PATH");
-    let (driver, mut events) = CodexDriver::spawn(persisted_config(codex, PermissionMode::Plan))
-        .await
-        .expect("spawn codex app-server");
+    let (driver, mut events) =
+        CodexDriver::spawn(persisted_config(codex, PermissionMode::Plan).await)
+            .await
+            .expect("spawn codex app-server");
 
     run_turn(&driver, &mut events, "Remember the word ALPHA. Reply: ok.").await;
     run_turn(&driver, &mut events, "Remember the word BRAVO. Reply: ok.").await;
@@ -246,11 +266,11 @@ async fn rewind_to_ordinal_truncates_model_memory() {
 }
 
 #[tokio::test]
-#[ignore = "requires a logged-in codex; makes real API calls"]
+#[ignore = "requires a logged-in codex; makes real API calls; HYPRLAYER_CODEX_MODEL overrides the model"]
 async fn rewind_after_a_resume_reverts_the_seeded_turns() {
     let codex = which::which("codex").expect("codex on PATH");
     let (driver, mut events) =
-        CodexDriver::spawn(persisted_config(codex.clone(), PermissionMode::Plan))
+        CodexDriver::spawn(persisted_config(codex.clone(), PermissionMode::Plan).await)
             .await
             .expect("spawn codex app-server");
     run_turn(&driver, &mut events, "Remember the word ALPHA. Reply: ok.").await;
@@ -265,7 +285,7 @@ async fn rewind_after_a_resume_reverts_the_seeded_turns() {
     let (driver, mut events) = CodexDriver::spawn(SpawnConfig {
         resume: Some(thread),
         prior_user_turns: 2,
-        ..persisted_config(codex, PermissionMode::Plan)
+        ..persisted_config(codex, PermissionMode::Plan).await
     })
     .await
     .expect("resume the thread");
@@ -302,7 +322,7 @@ async fn rewind_after_a_resume_reverts_the_seeded_turns() {
 }
 
 #[tokio::test]
-#[ignore = "requires a logged-in codex; makes real API calls"]
+#[ignore = "requires a logged-in codex; makes real API calls; HYPRLAYER_CODEX_MODEL overrides the model"]
 async fn plan_mode_asks_a_structured_question_and_the_next_turn_remembers_it() {
     let codex = which::which("codex").expect("codex on PATH");
     let tmp = tempfile::tempdir().expect("temp cwd");
@@ -311,7 +331,7 @@ async fn plan_mode_asks_a_structured_question_and_the_next_turn_remembers_it() {
     // leaving the plan *collaboration* mode is what unblocks it.
     let (driver, mut events) = CodexDriver::spawn(SpawnConfig {
         cwd: tmp.path().to_path_buf(),
-        ..persisted_config(codex, PermissionMode::AcceptEdits)
+        ..persisted_config(codex, PermissionMode::AcceptEdits).await
     })
     .await
     .expect("spawn codex app-server");
@@ -368,12 +388,13 @@ async fn plan_mode_asks_a_structured_question_and_the_next_turn_remembers_it() {
 }
 
 #[tokio::test]
-#[ignore = "requires a logged-in codex; makes a real API call"]
+#[ignore = "requires a logged-in codex; makes a real API call; HYPRLAYER_CODEX_MODEL overrides the model"]
 async fn interrupt_status_is_recorded() {
     let codex = which::which("codex").expect("codex on PATH");
-    let (driver, mut events) = CodexDriver::spawn(persisted_config(codex, PermissionMode::Plan))
-        .await
-        .expect("spawn codex app-server");
+    let (driver, mut events) =
+        CodexDriver::spawn(persisted_config(codex, PermissionMode::Plan).await)
+            .await
+            .expect("spawn codex app-server");
 
     driver
         .send_user_turn(
@@ -405,7 +426,7 @@ async fn interrupt_status_is_recorded() {
 }
 
 #[tokio::test]
-#[ignore = "requires a logged-in codex; starts threads but makes no model call"]
+#[ignore = "requires a logged-in codex; starts threads but makes no model call; HYPRLAYER_CODEX_MODEL overrides the model"]
 async fn every_permission_mode_starts_a_thread() {
     let codex = which::which("codex").expect("codex on PATH");
     for mode in [
@@ -414,7 +435,7 @@ async fn every_permission_mode_starts_a_thread() {
         PermissionMode::Plan,
         PermissionMode::BypassPermissions,
     ] {
-        let (driver, _events) = CodexDriver::spawn(spawn_config(codex.clone(), mode))
+        let (driver, _events) = CodexDriver::spawn(spawn_config(codex.clone(), mode).await)
             .await
             .unwrap_or_else(|e| panic!("{mode:?} should start a thread, got: {e}"));
         assert!(
@@ -604,7 +625,7 @@ async fn run_turn_with_timeout(
 }
 
 #[tokio::test]
-#[ignore = "requires a logged-in codex; makes real API calls"]
+#[ignore = "requires a logged-in codex; makes real API calls; HYPRLAYER_CODEX_MODEL overrides the model"]
 async fn fanout_file_returns_survive_the_join() {
     let codex = which::which("codex").expect("codex on PATH");
     let fixture = tempfile::tempdir().expect("fixture cwd");
@@ -650,9 +671,8 @@ async fn fanout_file_returns_survive_the_join() {
 
     let (driver, mut events) = CodexDriver::spawn(SpawnConfig {
         cwd: fixture.path().to_path_buf(),
-        model: Some("gpt-5.4".into()),
         effort: Some("medium".into()),
-        ..spawn_config(codex, PermissionMode::AcceptEdits)
+        ..spawn_config(codex, PermissionMode::AcceptEdits).await
     })
     .await
     .expect("spawn codex app-server");
@@ -754,7 +774,7 @@ impl CustomAgentFixture {
 }
 
 #[tokio::test]
-#[ignore = "requires a logged-in codex; makes real API calls"]
+#[ignore = "requires a logged-in codex; makes real API calls; HYPRLAYER_CODEX_MODEL overrides the model"]
 async fn custom_agent_spawns_by_name() {
     const MARKER: &str = "HYPRLAYER_CUSTOM_AGENT_SMOKE_OK_7294";
 
@@ -765,10 +785,9 @@ async fn custom_agent_spawns_by_name() {
     let fixture = CustomAgentFixture::install(&agent_name, MARKER, &result_path);
     let (driver, mut events) = CodexDriver::spawn(SpawnConfig {
         cwd: cwd.path().to_path_buf(),
-        model: Some("gpt-5.4".into()),
         effort: Some("low".into()),
         env: vec![fixture.env()],
-        ..spawn_config(codex, PermissionMode::AcceptEdits)
+        ..spawn_config(codex, PermissionMode::AcceptEdits).await
     })
     .await
     .expect("spawn codex app-server");
@@ -806,7 +825,7 @@ async fn custom_agent_spawns_by_name() {
 }
 
 #[tokio::test]
-#[ignore = "requires codex installed; no API call, but spawns an app-server"]
+#[ignore = "requires codex installed; no API call, but spawns an app-server; HYPRLAYER_CODEX_MODEL overrides the model"]
 async fn extra_skill_roots_reach_codex() {
     let codex = which::which("codex").expect("codex on PATH");
     let root = tempfile::tempdir().expect("tempdir");
@@ -820,7 +839,7 @@ async fn extra_skill_roots_reach_codex() {
 
     let (bridged, _events) = CodexDriver::spawn(SpawnConfig {
         skill_roots: vec![root.path().to_path_buf()],
-        ..spawn_config(codex.clone(), PermissionMode::Plan)
+        ..spawn_config(codex.clone(), PermissionMode::Plan).await
     })
     .await
     .expect("spawn with extra skill roots");
@@ -831,7 +850,7 @@ async fn extra_skill_roots_reach_codex() {
         "extra root was not scanned; codex saw: {names:?}"
     );
 
-    let (bare, _events) = CodexDriver::spawn(spawn_config(codex, PermissionMode::Plan))
+    let (bare, _events) = CodexDriver::spawn(spawn_config(codex, PermissionMode::Plan).await)
         .await
         .expect("spawn without extra skill roots");
     let names = bare.skills().await.expect("skills/list");
@@ -910,11 +929,11 @@ fn position(seen: &[Seen], want: &Seen) -> usize {
 }
 
 #[tokio::test]
-#[ignore = "requires a logged-in codex; makes real API calls"]
+#[ignore = "requires a logged-in codex; makes real API calls; HYPRLAYER_CODEX_MODEL overrides the model"]
 async fn a_message_sent_mid_turn_steers_the_running_turn() {
     let codex = which::which("codex").expect("codex on PATH");
     let (driver, mut events) =
-        CodexDriver::spawn(spawn_config(codex, PermissionMode::BypassPermissions))
+        CodexDriver::spawn(spawn_config(codex, PermissionMode::BypassPermissions).await)
             .await
             .expect("spawn codex app-server");
     let driver = std::sync::Arc::new(driver);
@@ -968,11 +987,11 @@ async fn a_message_sent_mid_turn_steers_the_running_turn() {
 }
 
 #[tokio::test]
-#[ignore = "requires a logged-in codex; makes real API calls"]
+#[ignore = "requires a logged-in codex; makes real API calls; HYPRLAYER_CODEX_MODEL overrides the model"]
 async fn an_interrupted_turn_hands_back_its_uncommitted_steer() {
     let codex = which::which("codex").expect("codex on PATH");
     let (driver, mut events) =
-        CodexDriver::spawn(spawn_config(codex, PermissionMode::BypassPermissions))
+        CodexDriver::spawn(spawn_config(codex, PermissionMode::BypassPermissions).await)
             .await
             .expect("spawn codex app-server");
     let seen = collect_turns(
@@ -1010,11 +1029,11 @@ async fn an_interrupted_turn_hands_back_its_uncommitted_steer() {
 }
 
 #[tokio::test]
-#[ignore = "requires a logged-in codex; makes real API calls"]
+#[ignore = "requires a logged-in codex; makes real API calls; HYPRLAYER_CODEX_MODEL overrides the model"]
 async fn rewind_maps_ordinals_past_a_steered_message() {
     let codex = which::which("codex").expect("codex on PATH");
     let (driver, mut events) =
-        CodexDriver::spawn(persisted_config(codex, PermissionMode::BypassPermissions))
+        CodexDriver::spawn(persisted_config(codex, PermissionMode::BypassPermissions).await)
             .await
             .expect("spawn codex app-server");
     let seen = collect_turns(
@@ -1066,12 +1085,13 @@ async fn rewind_maps_ordinals_past_a_steered_message() {
 
 #[cfg(feature = "test-support")]
 #[tokio::test]
-#[ignore = "requires a logged-in codex; starts a thread but makes no model call"]
+#[ignore = "requires a logged-in codex; starts a thread but makes no model call; HYPRLAYER_CODEX_MODEL overrides the model"]
 async fn native_goals_are_disabled_in_app_sessions() {
     let codex = which::which("codex").expect("codex on PATH");
-    let (driver, mut events) = CodexDriver::spawn(persisted_config(codex, PermissionMode::Plan))
-        .await
-        .expect("spawn codex app-server");
+    let (driver, mut events) =
+        CodexDriver::spawn(persisted_config(codex, PermissionMode::Plan).await)
+            .await
+            .expect("spawn codex app-server");
     let refused = driver
         .request_for_test(
             "thread/goal/set",
@@ -1136,11 +1156,11 @@ async fn thread_tokens_of_turn(
 
 #[cfg(feature = "test-support")]
 #[tokio::test]
-#[ignore = "requires a logged-in codex; makes real API calls"]
+#[ignore = "requires a logged-in codex; makes real API calls; HYPRLAYER_CODEX_MODEL overrides the model"]
 async fn goal_turns_report_thread_token_totals() {
     let codex = which::which("codex").expect("codex on PATH");
     let (driver, mut events) =
-        CodexDriver::spawn(persisted_config(codex.clone(), PermissionMode::Plan))
+        CodexDriver::spawn(persisted_config(codex.clone(), PermissionMode::Plan).await)
             .await
             .expect("spawn codex app-server");
     let first =
@@ -1163,7 +1183,7 @@ async fn goal_turns_report_thread_token_totals() {
     let (driver, mut events) = CodexDriver::spawn(SpawnConfig {
         resume: Some(thread),
         prior_user_turns: 2,
-        ..persisted_config(codex, PermissionMode::Plan)
+        ..persisted_config(codex, PermissionMode::Plan).await
     })
     .await
     .expect("resume the thread");
