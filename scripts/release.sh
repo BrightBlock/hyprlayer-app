@@ -49,7 +49,9 @@ if [[ "${RELEASE_SKIP_CHECKS:-}" != "1" ]]; then
   export HYPRLAYER_E2E_SERVER_BIN="$PWD/src-tauri/binaries/hyprlayer-server-$(rustc -vV | sed -n 's/^host: //p')"
   # Core's ignored smoke, migration and watcher tests stay out; nextest can't filter on #[ignore].
   GATE_FILTER='not (binary_id(hyprlayer-core::claude_driver_smoke) | binary_id(hyprlayer-core::codex_driver_smoke) | binary_id(hyprlayer-core::opencode_driver_smoke) | binary_id(hyprlayer-core::orphan_reap_real_server) | binary_id(hyprlayer-core::real_machine_smoke) | (binary_id(hyprlayer-core) & test(/(backfills_a_copied_profile|reaches_latest_on_a_copied_profile|watches_external_git_dir_and_fires_on_index_write|reading_the_git_index_does_not_fire|reading_a_watched_file_does_not_fire_the_callback|an_append_under_a_new_run_directory_fires_the_callback)$/)))'
-  step cargo nextest run --workspace --profile gate --run-ignored all -E "$GATE_FILTER" --no-run   # build, timed on its own
+  # The GPUI crates stay out: a broken one would otherwise fail the server's gate (ADR-0013).
+  WORKSPACE=(--workspace --exclude hyprlayer-ui --exclude hyprlayer-desktop)
+  step cargo nextest run "${WORKSPACE[@]}" --profile gate --run-ignored all -E "$GATE_FILTER" --no-run   # build, timed on its own
   # `<binary-id> <test>` for each test a `cargo nextest list -T json` run matched.
   matching() {
     node -e '
@@ -58,7 +60,7 @@ if [[ "${RELEASE_SKIP_CHECKS:-}" != "1" ]]; then
         for (const [n, t] of Object.entries(s.testcases))
           if (t["filter-match"].status === "matches") console.log(id + " " + n);' | LC_ALL=C sort
   }
-  IGNORED="$(cargo nextest list --workspace --run-ignored only -E "$GATE_FILTER" -T json | matching)"
+  IGNORED="$(cargo nextest list "${WORKSPACE[@]}" --run-ignored only -E "$GATE_FILTER" -T json | matching)"
   EXPECTED=$'hyprlayer-client::ssh_sign_in ssh_sign_in\nhyprlayer-e2e::pr_lifecycle pr_lifecycle\nhyprlayer-e2e::remote_host remote_host\nhyprlayer-e2e::remote_provider_auth remote_provider_auth\nhyprlayer-e2e::remote_slow_start remote_slow_start\nhyprlayer-e2e::server_memory remote_server_memory'
   if [[ "$IGNORED" != "$EXPECTED" ]]; then
     echo "✗ the gate filter admits a different set of ignored tests:"; echo "$IGNORED"
@@ -66,13 +68,13 @@ if [[ "${RELEASE_SKIP_CHECKS:-}" != "1" ]]; then
     exit 1
   fi
   # It excludes whole binaries, so a test added to one without #[ignore] would silently skip the gate.
-  DROPPED="$(cargo nextest list --workspace -E "not ($GATE_FILTER)" -T json | matching)"
+  DROPPED="$(cargo nextest list "${WORKSPACE[@]}" -E "not ($GATE_FILTER)" -T json | matching)"
   if [[ -n "$DROPPED" ]]; then
     echo "✗ the gate filter drops tests that aren't ignored:"; echo "$DROPPED"
     echo "  narrow GATE_FILTER in scripts/release.sh"
     exit 1
   fi
-  step cargo nextest run --workspace --profile gate --run-ignored all -E "$GATE_FILTER"
+  step cargo nextest run "${WORKSPACE[@]}" --profile gate --run-ignored all -E "$GATE_FILTER"
   step cargo check -p hyprlayer-models -p hyprlayer-core -p hyprlayer-proto   # specta-less: the app enables it, embedders don't
   step pnpm typecheck
   step pnpm lint

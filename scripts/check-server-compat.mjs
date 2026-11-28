@@ -18,7 +18,12 @@ const RPC = "crates/hyprlayer-server/src/rpc.rs";
 const PROTO = "crates/hyprlayer-proto/src/lib.rs";
 const SERVER_TOML = "crates/hyprlayer-server/Cargo.toml";
 const MIN_FILE = "crates/hyprlayer-client/src/server_version.rs";
-const APP_ROOTS = ["src-tauri/src", "crates/hyprlayer-client/src"];
+const APP_ROOTS = [
+  "src-tauri/src",
+  "crates/hyprlayer-client/src",
+  "crates/hyprlayer-desktop/src",
+  "crates/hyprlayer-ui/src",
+];
 
 const git = (...args) =>
   execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });

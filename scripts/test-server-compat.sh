@@ -55,7 +55,7 @@ replace() {
 
 mkdir -p "$WORK/base" && cd "$WORK/base"
 git init -q
-mkdir -p crates/hyprlayer-server/src crates/hyprlayer-client/src src-tauri/src/commands
+mkdir -p crates/hyprlayer-server/src crates/hyprlayer-client/src crates/hyprlayer-desktop/src crates/hyprlayer-ui/src src-tauri/src/commands
 table "$TABLE"
 server_version 0.9.0
 min_version 0.9.0
