@@ -20,7 +20,7 @@ use crate::config::Config;
 use crate::connection::{Connection, Status};
 use crate::events::Topic;
 use crate::io::Io;
-use crate::query::{fetch, Query};
+use crate::query::{fetch, Fetch, Query};
 use crate::recovery::Recovery;
 
 pub struct Desktop {
@@ -34,28 +34,43 @@ pub struct Desktop {
 /// One list's rows as (tracker key, label).
 type Rows = Vec<(String, String)>;
 
+fn list<T: Send + 'static>(
+    topics: &'static [Topic],
+    read: Fetch<(), T>,
+    connection: &Entity<Connection>,
+    io: &Io,
+    cx: &mut Context<Desktop>,
+) -> Entity<Query<(), T>> {
+    let (connection, io) = (connection.clone(), io.clone());
+    cx.new(|cx| Query::new((), topics, read, connection, io, cx))
+}
+
 impl Desktop {
     pub fn new(config: Config, io: Io, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mode = Mode::from_appearance(window.appearance());
         theme::install(mode, cx);
         let connection = cx.new(|cx| Connection::new(config, io.clone(), mode, cx));
-        let query =
-            |topics, connection: &Entity<Connection>| (topics, connection.clone(), io.clone());
-        let (topics, conn, io_) = query(&[Topic::Bootstrap], &connection);
-        let projects = cx.new(|cx| {
-            let read = fetch(|c, ()| async move { c.get_bootstrap().await.map(|b| b.projects) });
-            Query::new((), topics, read, conn, io_, cx)
-        });
-        let (topics, conn, io_) = query(&[Topic::Workstreams], &connection);
-        let workstreams = cx.new(|cx| {
-            let read = fetch(|c, ()| async move { c.list_all_workstreams().await });
-            Query::new((), topics, read, conn, io_, cx)
-        });
-        let (topics, conn, io_) = query(&[Topic::ActiveSessions], &connection);
-        let sessions = cx.new(|cx| {
-            let read = fetch(|c, ()| async move { c.list_active_sessions().await });
-            Query::new((), topics, read, conn, io_, cx)
-        });
+        let projects = list(
+            &[Topic::Bootstrap],
+            fetch(|c, ()| async move { c.get_bootstrap().await.map(|b| b.projects) }),
+            &connection,
+            &io,
+            cx,
+        );
+        let workstreams = list(
+            &[Topic::Workstreams],
+            fetch(|c, ()| async move { c.list_all_workstreams().await }),
+            &connection,
+            &io,
+            cx,
+        );
+        let sessions = list(
+            &[Topic::ActiveSessions],
+            fetch(|c, ()| async move { c.list_active_sessions().await }),
+            &connection,
+            &io,
+            cx,
+        );
         let subscriptions = vec![
             cx.observe(&connection, |_, _, cx| cx.notify()),
             cx.observe(&projects, |_, _, cx| cx.notify()),

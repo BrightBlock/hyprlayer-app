@@ -17,7 +17,6 @@ use crate::io::Io;
 pub type Fetched<T> = Pin<Box<dyn Future<Output = Result<T, UiError>> + Send>>;
 pub type Fetch<K, T> = Arc<dyn Fn(Arc<RpcClient>, K) -> Fetched<T> + Send + Sync>;
 
-/// Wraps an `RpcClient` call as a `Fetch`.
 pub fn fetch<K, T, Fut>(
     call: impl Fn(Arc<RpcClient>, K) -> Fut + Send + Sync + 'static,
 ) -> Fetch<K, T>

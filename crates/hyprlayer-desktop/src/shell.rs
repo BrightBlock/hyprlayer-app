@@ -97,7 +97,6 @@ pub fn open(
     let window = cx.open_window(options, |window, cx| {
         let view = cx.new(|cx| Desktop::new(config, io, window, cx));
         desktop = Some(view.clone());
-        // Closing the window quits, as the Tauri window's close does.
         window.on_window_should_close(cx, move |window, cx| {
             save(&saved, window);
             cx.quit();

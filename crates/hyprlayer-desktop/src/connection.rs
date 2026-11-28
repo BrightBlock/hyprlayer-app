@@ -157,7 +157,6 @@ impl Connection {
         self.gaps
     }
 
-    /// Starts an attempt unless one is under way or the link is up.
     pub fn connect(&mut self, cx: &mut Context<Self>) {
         if self.attempting || self.client.is_some() {
             return;
