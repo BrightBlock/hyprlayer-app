@@ -19,10 +19,11 @@ tempfile = "3"
 rusqlite = { version = "0.40.1", features = ["bundled"] }
 gpui = { package = "gpui-pre", version = "=0.3.14", features = ["test-support"], optional = true }
 hyprlayer-desktop = { path = "../hyprlayer-desktop", optional = true }
+hyprlayer-ui = { path = "../hyprlayer-ui", optional = true }
 
 [features]
 # The GPUI tier. Off by default so the server's release gate never builds GPUI.
-gpui = ["dep:gpui", "dep:hyprlayer-desktop"]
+gpui = ["dep:gpui", "dep:hyprlayer-desktop", "dep:hyprlayer-ui"]
 
 [dev-dependencies]
 ghostty-vt.workspace = true

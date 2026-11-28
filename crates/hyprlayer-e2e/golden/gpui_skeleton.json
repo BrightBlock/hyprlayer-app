@@ -149,6 +149,26 @@
           "evidence": {}
         }
       ]
+    },
+    {
+      "step": "Retry on the recovery screen reconnects without waiting for the pacer",
+      "guards": [
+        {
+          "guard": "the recovery screen shows Retry while the server is down",
+          "ok": true,
+          "evidence": {}
+        },
+        {
+          "guard": "the click reconnects, before the next paced retry was due",
+          "ok": true,
+          "evidence": {
+            "connection": {
+              "state": "connected",
+              "outdated": false
+            }
+          }
+        }
+      ]
     }
   ]
 }

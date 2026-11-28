@@ -4184,6 +4184,7 @@ dependencies = [
  "hyprlayer-desktop",
  "hyprlayer-proto",
  "hyprlayer-server",
+ "hyprlayer-ui",
  "libc",
  "reqwest 0.12.28",
  "rusqlite",

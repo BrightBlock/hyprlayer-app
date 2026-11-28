@@ -13,10 +13,12 @@ use hyprlayer_client::hosts::Target;
 use hyprlayer_client::paths::AppPaths;
 use hyprlayer_desktop::config::Config;
 use hyprlayer_desktop::desktop::Desktop;
+use hyprlayer_desktop::drive;
 use hyprlayer_desktop::io::Io;
 use hyprlayer_desktop::shell;
 use hyprlayer_e2e::flows::{create_workstream, onboard_and_import};
 use hyprlayer_e2e::{json, text, Journey, Sandbox, Server, Value};
+use hyprlayer_ui::track::Tracker;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::UnixStream;
 
@@ -24,6 +26,8 @@ const SETTLE: Duration = Duration::from_secs(30);
 /// Past the server's 256-frame queue plus a Linux socket buffer (~208 KiB) of ~150-byte events.
 const FLOOD_EVENTS: usize = 4000;
 const FLOOD_WORKERS: usize = 16;
+/// Past the pacer's 1, 2 and 5 s retries, so its next one is 15 s away.
+const PAST_PACED: Duration = Duration::from_secs(10);
 
 /// Forwards each desktop connection to the server's socket; `stalled` stops the server's half.
 struct Proxy {
@@ -255,15 +259,11 @@ fn gpui_skeleton() {
 
     j.step("the desktop shows recovery when its server is killed, then reconnects");
     let connects = count(&dump, "connects");
-    let killed = unsafe { libc::kill(server.pid() as i32, libc::SIGKILL) } == 0;
-    let reaped = io
-        .handle()
-        .block_on(server.exited(Duration::from_secs(10)))
-        .is_some();
+    let killed = kill(&io, &mut server);
     let (recovering, dump) = wait(&mut cx, &desktop, SETTLE, |d| {
         state(d) == "lost" && painted(d, "recovery")
     });
-    j.guard("the server is gone", killed && reaped, json!({}));
+    j.guard("the server is gone", killed, json!({}));
     j.guard(
         "the recovery screen replaces the lists",
         recovering && painted(&dump, "recovery-retry") && !painted(&dump, "projects"),
@@ -278,7 +278,7 @@ fn gpui_skeleton() {
     );
     let lost_at = Instant::now();
     drop(server);
-    let server = io.handle().block_on(Server::start(&sandbox));
+    let mut server = io.handle().block_on(Server::start(&sandbox));
     let (back, dump) = wait(&mut cx, &desktop, Duration::from_secs(60), |d| {
         state(d) == "connected"
             && count(d, "connects") > connects
@@ -306,9 +306,57 @@ fn gpui_skeleton() {
         json!({}),
     );
 
+    j.step("Retry on the recovery screen reconnects without waiting for the pacer");
+    let connects = count(&dump, "connects");
+    let killed = kill(&io, &mut server);
+    let (recovering, _) = wait(&mut cx, &desktop, SETTLE, |d| {
+        state(d) == "lost" && painted(d, "recovery-retry")
+    });
+    let lost_at = Instant::now();
+    // Pumped, not slept: a paced retry queued meanwhile would otherwise fire after the restart.
+    wait(&mut cx, &desktop, PAST_PACED, |_| false);
+    drop(server);
+    let server = io.handle().block_on(Server::start(&sandbox));
+    let retry = cx.read(|cx| Tracker::find(cx, "recovery-retry"));
+    let clicked = retry.is_some_and(|bounds| {
+        window
+            .update(&mut cx, |_, window, cx| {
+                drive::click(window, bounds.center(), cx)
+            })
+            .is_ok()
+    });
+    let (back, dump) = wait(&mut cx, &desktop, Duration::from_secs(5), |d| {
+        state(d) == "connected" && count(d, "connects") > connects
+    });
+    let paced_retry_due = Duration::from_secs(1 + 2 + 5 + 15);
+    j.note(
+        "retry",
+        json!({ "seconds_after_drop": lost_at.elapsed().as_secs_f64() }),
+    );
+    j.guard(
+        "the recovery screen shows Retry while the server is down",
+        killed && recovering && clicked,
+        json!({}),
+    );
+    j.guard(
+        "the click reconnects, before the next paced retry was due",
+        back && lost_at.elapsed() < paced_retry_due,
+        json!({ "connection": dump["connection"] }),
+    );
+
     cx.update(|cx| cx.quit());
     drop(server);
     j.finish();
+}
+
+/// SIGKILL, so the server writes nothing on its way out, then reap it.
+fn kill(io: &Io, server: &mut Server) -> bool {
+    let signalled = unsafe { libc::kill(server.pid() as i32, libc::SIGKILL) } == 0;
+    signalled
+        && io
+            .handle()
+            .block_on(server.exited(Duration::from_secs(10)))
+            .is_some()
 }
 
 /// `reorder_lead_queue` emits one `LeadQueueChanged` per call from another connection, which
