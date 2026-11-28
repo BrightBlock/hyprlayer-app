@@ -252,11 +252,15 @@ pub fn click(window: &mut Window, position: gpui::Point<gpui::Pixels>, cx: &mut 
 }
 
 async fn run(program: &str, args: &[String]) -> Value {
-    match tokio::process::Command::new(program)
+    // grim blocks while its output is off (DPMS), so no op waits on a tool forever.
+    let output = tokio::process::Command::new(program)
         .args(args)
-        .output()
-        .await
-    {
+        .kill_on_drop(true)
+        .output();
+    let Ok(output) = tokio::time::timeout(std::time::Duration::from_secs(10), output).await else {
+        return failed(&format!("{program} did not finish within 10 s"));
+    };
+    match output {
         Ok(out) => json!({
             "ok": out.status.success(),
             "status": out.status.code(),

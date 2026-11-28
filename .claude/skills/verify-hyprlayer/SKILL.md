@@ -153,17 +153,20 @@ drive '{"op":"state"}' '{"op":"ids"}'
 - `drive '{"op":"quit"}'` quits cleanly: it saves `$R/client/config/native-window.json` and ends any ssh relay. Then stop the server by its pid, and remove the bridge's socket dir, which lives outside `$R`, before `$R` itself: `S=$(cat $R/client/data/native-drive-socket) && rm -rf "${S%/drive.sock}"; rm -rf "$R"`.
 - Without `--attach` the client starts its own server on `$R/client/data`, as a release launch does. Stop that one with `hyprlayer-server stop` under `HYPRLAYER_APP_CONFIG_DIR=$R/client/config`, `HYPRLAYER_APP_DATA_DIR=$R/client/data` and `HYPRLAYER_APP_LOG_DIR=$R/client/logs`.
 - A second launch with the same `--profile-dir` exits and brings the first window forward.
-- `state` answers `visible`. When it is `false` (the window is covered, minimised, hidden or on another Space), the window draws no frames, `painted` is the last visible frame's, and `click` finds only ids from that frame. On macOS, launch the same command again to bring the window forward. An agent session behind a full-screen app may never get a visible window, so check `visible` before asserting `painted`.
+- `state` answers `visible`. When it is `false` (the window is covered, minimised, hidden or on another Space), the window draws no frames, `painted` is the last visible frame's, and `click` finds only ids from that frame. On macOS, launch the same command again to bring the window forward. An agent session behind a full-screen app may never get a visible window, so check `visible` before asserting `painted`. On Wayland `visible` stays `true` while the output is off (DPMS or a lock screen), so check `hyprctl monitors -j` too; `capture` there grabs whatever covers the window's rectangle, the lock screen included.
 - macOS `capture` answers the window number it gave `screencapture -l`. It needs Screen Recording for the app; without it the reply is `could not create image from window`.
-- macOS notifications: the bare binary answers `notify` with `no bundle identifier`. To test one, bundle it, then accept the permission prompt on the first `notify`:
+- macOS notifications: the bare binary answers `notify` with `no bundle identifier`. To test one, bundle it, then accept the permission prompt on the first `notify`. The bundle sits under the worktree, not `$TMPDIR`: a three-key plist in `$TMPDIR` is refused with "Notifications are not allowed" and no prompt, while this one reached the prompt (which of the changes matters is untested). A human must click Allow; an unattended prompt was recorded as denied after about 5 s:
   ```bash
-  A=$R/HyprlayerNative.app/Contents; mkdir -p $A/MacOS
+  A=$PWD/target/live/HyprlayerNative.app/Contents; mkdir -p $A/MacOS
   cp target/debug/hyprlayer-native target/debug/hyprlayer-server $A/MacOS/
   plutil -create xml1 $A/Info.plist
   plutil -insert CFBundleIdentifier -string ai.brightblock.hyprlayer.verify-native $A/Info.plist
   plutil -insert CFBundleExecutable -string hyprlayer-native $A/Info.plist
   plutil -insert CFBundleName -string HyprlayerNative $A/Info.plist
-  codesign -s - --force $R/HyprlayerNative.app
+  plutil -insert CFBundlePackageType -string APPL $A/Info.plist
+  plutil -insert CFBundleShortVersionString -string 0.1.0 $A/Info.plist
+  plutil -insert CFBundleVersion -string 1 $A/Info.plist
+  codesign -s - --force --deep $A/..
   $A/MacOS/hyprlayer-native --identifier ai.brightblock.hyprlayer.verify-native --profile-dir $R/client --attach $R/srv/data &
   ```
 - Linux (Hyprland): a throwaway identifier's window class is `Hyprlayer-Debug`, so the `hlverify` rule above routes it. `.dev` is `Hyprlayer-Dev` and the release is `Hyprlayer`. `capture` runs `grim -g` on the geometry `hyprctl clients -j` gives for the app's pid. A copy check needs `{"op":"key","keystroke":"ctrl-c","mode":"compositor","focus":true}`, because an in-app key has no input serial. `focus` moves keyboard focus, and may switch the visible workspace, to the app's window; the G1 probe focused first. Only a single modifier is proven. Both need `HYPRLAND_INSTANCE_SIGNATURE` and `WAYLAND_DISPLAY` in the app's environment.

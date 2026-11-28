@@ -139,6 +139,8 @@ native widgets on all three platforms, and the pinned pair from crates.io compil
 - `hosts.json` is read once at launch. A host switch made in the Tauri client needs a relaunch,
   and the client cannot answer ssh prompts yet (batch only).
 - The Tauri app's quit confirmation (`settings.quit.confirm`) is not built yet.
-- The macOS notification path, delegate included, is unproven until a live check posts one from
-  a bundled `.app`.
+- The macOS notification path, delegate included, is unproven. G4's live check reached the
+  permission prompt from a bundled `.app`, but nobody clicked Allow, so none was posted. On Linux
+  the D-Bus `Notify` call reached the notification daemon.
+- On Wayland, `visible` stays true while the output is off, so `painted` can be stale.
 - The fonts above.

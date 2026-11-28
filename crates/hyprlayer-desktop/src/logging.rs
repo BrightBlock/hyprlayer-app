@@ -65,7 +65,13 @@ struct Logger {
 
 impl Log for Logger {
     fn enabled(&self, metadata: &Metadata) -> bool {
-        metadata.level() <= self.level
+        // zbus logs every D-Bus handshake (notify-rust) at info.
+        let level = if metadata.target().starts_with("zbus") {
+            self.level.min(LevelFilter::Warn)
+        } else {
+            self.level
+        };
+        metadata.level() <= level
     }
 
     fn log(&self, record: &Record) {
