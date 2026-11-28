@@ -881,7 +881,6 @@ impl AgentControlService<'_> {
                 ));
             }
             interrupt_turn(agents, terminal_id, &target.session).await?;
-            agents.note_input(terminal_id);
         }
         let delivery = if interrupted
             || agents.holds(terminal_id)
@@ -1311,7 +1310,11 @@ async fn deliver_held(agents: Arc<PtyAgents>, terminal_id: String) {
 }
 
 /// In claude's vim mode the first Esc only leaves INSERT, so a second one stops the turn.
-async fn interrupt_turn(agents: &PtyAgents, terminal_id: &str, pty: &PtySession) -> Result<()> {
+async fn interrupt_turn(
+    agents: &Arc<PtyAgents>,
+    terminal_id: &str,
+    pty: &PtySession,
+) -> Result<()> {
     let inserting = agents
         .snapshot(terminal_id)
         .and_then(|now| now.screen?.rows())
@@ -1327,6 +1330,8 @@ async fn interrupt_turn(agents: &PtyAgents, terminal_id: &str, pty: &PtySession)
         tokio::time::sleep(ESC_GAP).await;
         pty.write_input(b"\x1b")?;
     }
+    // A cancelled ask fires no hook, so only the screen can say the agent is idle again.
+    agents.note_input(terminal_id);
     Ok(())
 }
 

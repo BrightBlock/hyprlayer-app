@@ -40,7 +40,8 @@ const MCP_REPLY: Duration = Duration::from_secs(30);
 /// `--stub-trust` first shows claude's folder-trust prompt, firing no hook, and reads one line:
 /// `trust` goes on to the launch; anything else exits, as claude's default "No, exit" does.
 /// Without `--stub-tui` it paints claude's empty input box at launch and after each line, a
-/// permission or question prompt after `ask` or `question`, the `/model` picker after `picker`, and
+/// permission or question prompt after `ask` or `question` (a lone Esc cancels it with no hook, as
+/// claude 2.1.332 does), the `/model` picker after `picker`, and
 /// nothing after `tools`. The statusLine
 /// `--settings` names runs on `status` (its stdout to `statusline.out`, its exit to
 /// `statusline.log`), on shift+tab (`ESC [ Z`: the next mode of the manual → accept edits → plan →
@@ -221,12 +222,24 @@ if [ -z "$tui" ]; then
   stty -icanon min 1 time 0
   box
   hook SessionStart "$(ev SessionStart ',"source":"startup"')"
-  while IFS= read -r line; do
+  open=""; nl=$(printf '\nx'); nl=${nl%x}
+  while :; do
+    if [ -n "$open" ]; then
+      # Byte by byte, so a lone Esc cancels the prompt as claude's does: no hook, just the box.
+      c=$(dd bs=1 count=1 2>/dev/null; printf x); c=${c%x}
+      [ -n "$c" ] || exit 0
+      open=""
+      if [ "$c" = "$esc" ]; then box; continue; fi
+      line=""
+      [ "$c" = "$nl" ] || { IFS= read -r line || exit 0; line="$c$line"; }
+    else
+      IFS= read -r line || exit 0
+    fi
     printf '%s\n' "$line" >> "$dir/stdin.log"
     run_line "$line"
     case "$line" in
-      ask) printf '\033[2J\033[H Bash command\n   rm -rf build\n\n Do you want to proceed?\n \342\235\257 1. Yes\n   2. No\n\n Esc to cancel \302\267 Tab to amend\n' ;;
-      question) printf '\033[2J\033[H Which one?\n \342\235\257 1. This\n   2. That\n\n Enter to select \302\267 Esc to cancel\n' ;;
+      ask) open=1; printf '\033[2J\033[H Bash command\n   rm -rf build\n\n Do you want to proceed?\n \342\235\257 1. Yes\n   2. No\n\n Esc to cancel \302\267 Tab to amend\n' ;;
+      question) open=1; printf '\033[2J\033[H Which one?\n \342\235\257 1. This\n   2. That\n\n Enter to select \302\267 Esc to cancel\n' ;;
       picker) printf '\033[2J\033[H   Select model\n   \342\235\257 1.  Default (recommended)   Sonnet 5.5\n\n   Enter to set as default \302\267 s to use this session only \302\267 Esc to cancel\n' ;;
       tools) ;;
       *) box ;;
