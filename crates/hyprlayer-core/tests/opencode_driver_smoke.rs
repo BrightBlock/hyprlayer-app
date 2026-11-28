@@ -404,7 +404,8 @@ async fn a_turn_whose_permission_is_denied_ends() {
     let trailing = trailing_turn_ends(&mut live.events, Duration::from_secs(3)).await;
     println!("{denied:?}\nthen {trailing:?}");
     live.close().await;
-    assert_eq!(denied.status.as_deref(), Some("completed"));
+    // As in opencode_resume: OpenCode 2 ends a run whose permission is refused as interrupted.
+    assert_eq!(denied.status.as_deref(), Some("interrupted"));
     assert!(trailing.is_empty(), "one TurnDone per turn: {trailing:?}");
 }
 
@@ -513,19 +514,19 @@ async fn a_message_queued_behind_a_stopped_turn_is_handed_back_and_unread() {
     live.driver.interrupt().expect("abort");
     let seen = until_turn_done(&mut live.events).await;
 
-    let record = std::fs::read_to_string(live._root.path().join("app-data/opencode-server.pid"))
-        .expect("the server's pid record");
-    let port = record.split_whitespace().last().expect("the server's port");
-    let messages: serde_json::Value = reqwest::Client::new()
-        .get(format!("http://127.0.0.1:{port}/session/{session}/message"))
-        .query(&[("directory", live.cwd.as_str())])
-        .send()
+    // The driver's read-back routes; a message OpenCode has not read waits in the inbox.
+    let messages = live
+        .server
+        .get_data(&format!("/session/{session}/message?limit=50&order=desc"))
         .await
         .expect("read the session's messages")
-        .json()
+        .to_string();
+    let inbox = live
+        .server
+        .get_data(&format!("/session/{session}/inbox"))
         .await
-        .expect("messages as JSON");
-    let kept = messages.to_string().contains(CODEWORD);
+        .expect("read the session's inbox")
+        .to_string();
     live.close().await;
 
     let handed_back = seen.iter().position(|e| {
@@ -543,5 +544,13 @@ async fn a_message_queued_behind_a_stopped_turn_is_handed_back_and_unread() {
         handed_back.is_some_and(|at| at < seen.len() - 1),
         "handed back before the turn's end"
     );
-    assert!(!kept, "OpenCode's history no longer holds it");
+    assert!(
+        messages.contains("count from 1 to 400"),
+        "the session's own history: {messages}"
+    );
+    assert!(
+        !messages.contains(CODEWORD),
+        "OpenCode's history never held it"
+    );
+    assert!(!inbox.contains(CODEWORD), "nor does its inbox: {inbox}");
 }
