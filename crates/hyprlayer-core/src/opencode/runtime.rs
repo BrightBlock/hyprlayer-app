@@ -399,7 +399,8 @@ impl OpenCodeServer {
         self.info().await.is_ok()
     }
 
-    async fn get_data(&self, path: &str) -> Result<Value, String> {
+    /// The `data` of an authenticated `GET /api{path}`.
+    pub async fn get_data(&self, path: &str) -> Result<Value, String> {
         let mut body: Value = self
             .request(reqwest::Method::GET, path)
             .timeout(Duration::from_secs(5))
