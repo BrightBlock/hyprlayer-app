@@ -39,12 +39,13 @@ actions!(
 /// Not the window-state plugin's `.window-state.json`: the Tauri app owns that one.
 const WINDOW_STATE: &str = "native-window.json";
 
-/// A compositor rule or launcher's `StartupWMClass` tells the release from every other build.
+/// A compositor rule or launcher's `StartupWMClass` tells the builds apart; a throwaway profile
+/// gets the verify skill's `Hyprlayer-Debug`, so its window rule never catches the user's.
 pub fn app_id(identifier: &str) -> &'static str {
-    if identifier == APP_IDENTIFIER {
-        "Hyprlayer"
-    } else {
-        "Hyprlayer-Dev"
+    match identifier.strip_prefix(APP_IDENTIFIER) {
+        Some("") => "Hyprlayer",
+        Some(".dev") => "Hyprlayer-Dev",
+        _ => "Hyprlayer-Debug",
     }
 }
 
