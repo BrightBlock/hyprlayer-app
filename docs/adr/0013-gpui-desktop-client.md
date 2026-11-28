@@ -51,7 +51,11 @@ lost link never presents stale rows.
   profile's dirs, and the supervisor evicts a mismatched server on its own profile
   (`replaces_own_build`).
 - Its own files never collide with the Tauri app's: `hyprlayer-native.log` (5 MB, five kept),
-  `native-window.json`, `native-instance.lock` and the `native.sock` single-instance socket.
+  `native-window.json`, `native-instance.lock` and the `native.sock` single-instance socket,
+  which sits beside `drive.sock`.
+- The window class is `Hyprlayer` for the release identifier, `Hyprlayer-Dev` for `.dev`, and
+  `Hyprlayer-Debug` for any other identifier, so a verify profile's window matches the verify
+  skill's Hyprland rule and never the user's.
 
 ### Coexistence
 
@@ -63,9 +67,11 @@ merges.
 
 ### Drive bridge
 
-Debug builds on Unix serve newline JSON on `<runtime dir>/drive.sock`, where the runtime dir is
-`hyprlayer_server::socket::runtime_dir(<data dir>)`. The path is logged and written to
-`<data dir>/native-drive-socket`. Every answer is one line with `"ok"`.
+Debug builds on Unix serve newline JSON on `hl-native-<profile hash>/drive.sock` under
+`$TMPDIR` (macOS) or `$XDG_RUNTIME_DIR/hyprlayer` (Linux), short enough for `sun_path`. It is
+not the server's `socket::runtime_dir`, because a server starting on the same profile deletes
+every socket there. The path is logged and written to `<data dir>/native-drive-socket`. Every
+answer is one line with `"ok"`.
 
 | Op | Does |
 |---|---|
@@ -73,8 +79,8 @@ Debug builds on Unix serve newline JSON on `<runtime dir>/drive.sock`, where the
 | `find {id}` | one element's bounds |
 | `click {id}` | mouse move, down and up at its centre, dispatched in-app |
 | `key {keystroke}` | an in-app keystroke (`cmd-q`, `ctrl-c`) |
-| `key {keystroke, mode: "compositor"}` | the key through Hyprland's `hl.dsp.send_shortcut` |
-| `state` | `Desktop::dump`: connection state, lists, fetch counts, painted ids |
+| `key {keystroke, mode: "compositor", focus?}` | the key through Hyprland's `hl.dsp.send_shortcut`, focusing the window first if asked |
+| `state` | `Desktop::dump` (connection state, lists, fetch counts, painted ids) and whether the window is `visible` |
 | `capture {path}` | `screencapture -l <window>` on macOS, `grim -g` under Hyprland |
 | `notify {title, body}` | one notification through the client's notifier |
 | `quit` | quits after answering |
@@ -119,8 +125,9 @@ native widgets on all three platforms, and the pinned pair from crates.io compil
   such bumps in the PR that causes them.
 - `@fontsource` ships only woff and woff2, which neither Core Text nor fontdb loads. The client
   registers no fonts yet, and an uninstalled Inter or JetBrains Mono falls back to the system's.
-- On macOS an occluded or minimised window does not paint. A drive-bridge check reads `painted`
-  only while the window is visible.
+- A window AppKit reports occluded (covered, minimised, hidden or on another Space) stops its
+  display link and draws nothing, so `painted` keeps the last visible frame. `state` reports
+  `visible` so a check can tell.
 
 ## Open items
 

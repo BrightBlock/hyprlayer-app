@@ -125,7 +125,7 @@ Never run it bare. Its default profile is `.dev`, and its supervisor replaces a 
 ```bash
 node scripts/build-server-sidecar.mjs --debug
 cargo build -p hyprlayer-desktop -p hyprlayer-server
-R=$(mktemp -d "${TMPDIR:-/tmp}/hl-native-XXXX"); mkdir -p $R/home $R/tmp $R/srv/config $R/srv/data $R/srv/logs
+R=$(mktemp -d "${TMPDIR:-/tmp}/hl-verify-native-XXXX"); mkdir -p $R/home $R/tmp $R/srv/config $R/srv/data $R/srv/logs
 # Starts the server and waits until it listens: it records its socket in .server-socket on bind.
 serve() { rm -f $R/srv/data/.server-socket
   env -i HOME=$R/home PATH=/usr/bin:/bin TMPDIR=$R/tmp USER=verify \
@@ -150,9 +150,11 @@ drive '{"op":"state"}' '{"op":"ids"}'
 
 - Tracked ids: `projects`, `workstreams`, `sessions`, a row as `projects:<path>`, `workstreams:<id>` or `sessions:<id>`, `status`, and on the recovery screen `recovery`, `recovery-title`, `recovery-message`, `recovery-remedy` and `recovery-retry`. A list in `state` is `null` unless it was read on the live connection.
 - Server restart: `kill -9 $(cat $R/server.pid)`. `state` shows `lost` and `painted` lists `recovery`. Run `serve` again. The client retries 1, 2, 5 and 15 s after the drop, then every 30 s, so `state` turns `connected` within 30 s, with `connects` risen and the lists back. `drive '{"op":"click","id":"recovery-retry"}'` retries at once. The server also stops on its own when its last client leaves and no `claude` is installed, so restart it after quitting the client.
-- `drive '{"op":"quit"}'` quits cleanly: it saves `$R/client/config/native-window.json` and ends any ssh relay. Then stop the server by its pid and `rm -rf $R`.
+- `drive '{"op":"quit"}'` quits cleanly: it saves `$R/client/config/native-window.json` and ends any ssh relay. Then stop the server by its pid, and remove the bridge's socket dir, which lives outside `$R`, before `$R` itself: `S=$(cat $R/client/data/native-drive-socket) && rm -rf "${S%/drive.sock}"; rm -rf "$R"`.
+- Without `--attach` the client starts its own server on `$R/client/data`, as a release launch does. Stop that one with `hyprlayer-server stop` under `HYPRLAYER_APP_CONFIG_DIR=$R/client/config`, `HYPRLAYER_APP_DATA_DIR=$R/client/data` and `HYPRLAYER_APP_LOG_DIR=$R/client/logs`.
 - A second launch with the same `--profile-dir` exits and brings the first window forward.
-- macOS: an occluded or minimised window does not paint, so `painted` keeps the last frame. Launch the same command again to bring it forward. `capture` needs Screen Recording for the app; without it the reply is `could not create image from window`.
+- `state` answers `visible`. When it is `false` (the window is covered, minimised, hidden or on another Space), the window draws no frames, `painted` is the last visible frame's, and `click` finds only ids from that frame. On macOS, launch the same command again to bring the window forward. An agent session behind a full-screen app may never get a visible window, so check `visible` before asserting `painted`.
+- macOS `capture` answers the window number it gave `screencapture -l`. It needs Screen Recording for the app; without it the reply is `could not create image from window`.
 - macOS notifications: the bare binary answers `notify` with `no bundle identifier`. To test one, bundle it, then accept the permission prompt on the first `notify`:
   ```bash
   A=$R/HyprlayerNative.app/Contents; mkdir -p $A/MacOS
@@ -164,7 +166,7 @@ drive '{"op":"state"}' '{"op":"ids"}'
   codesign -s - --force $R/HyprlayerNative.app
   $A/MacOS/hyprlayer-native --identifier ai.brightblock.hyprlayer.verify-native --profile-dir $R/client --attach $R/srv/data &
   ```
-- Linux (Hyprland): a throwaway identifier's window class is `Hyprlayer-Debug`, so the `hlverify` rule above routes it. `.dev` is `Hyprlayer-Dev` and the release is `Hyprlayer`. `capture` runs `grim -g` on the geometry `hyprctl clients -j` gives for the app's pid. A copy check needs `{"op":"key","keystroke":"ctrl-c","mode":"compositor"}`, because an in-app key has no input serial. Both need `HYPRLAND_INSTANCE_SIGNATURE` and `WAYLAND_DISPLAY` in the app's environment.
+- Linux (Hyprland): a throwaway identifier's window class is `Hyprlayer-Debug`, so the `hlverify` rule above routes it. `.dev` is `Hyprlayer-Dev` and the release is `Hyprlayer`. `capture` runs `grim -g` on the geometry `hyprctl clients -j` gives for the app's pid. A copy check needs `{"op":"key","keystroke":"ctrl-c","mode":"compositor","focus":true}`, because an in-app key has no input serial. `focus` moves keyboard focus, and may switch the visible workspace, to the app's window; the G1 probe focused first. Only a single modifier is proven. Both need `HYPRLAND_INSTANCE_SIGNATURE` and `WAYLAND_DISPLAY` in the app's environment.
 - The repeatable version of these checks is `cargo test -p hyprlayer-e2e --features gpui --test gpui_skeleton`.
 
 ## Gotchas
