@@ -19,10 +19,24 @@ pub struct Guard {
     listener: std::os::unix::net::UnixListener,
 }
 
-/// A short dir, since `sun_path` caps a socket path near 104 bytes.
+/// A short private dir, since `sun_path` caps a socket path near 104 bytes. Not the server's
+/// `socket::runtime_dir`: a server starting on this profile deletes every socket in that one.
 #[cfg(unix)]
 pub fn socket_dir(data: &Path) -> PathBuf {
-    hyprlayer_server::socket::runtime_dir(data).unwrap_or_else(|| data.to_path_buf())
+    use std::os::unix::fs::PermissionsExt;
+
+    let base = match std::env::var_os("XDG_RUNTIME_DIR").filter(|v| !v.is_empty()) {
+        Some(xdg) if cfg!(target_os = "linux") => PathBuf::from(xdg).join("hyprlayer"),
+        _ => std::env::temp_dir(),
+    };
+    let hash = hyprlayer_server::socket::profile_hash(data);
+    let dir = base.join(format!("hl-native-{hash}"));
+    let made = std::fs::create_dir_all(&dir)
+        .and_then(|()| std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)));
+    match made {
+        Ok(()) => dir,
+        Err(_) => data.to_path_buf(),
+    }
 }
 
 pub fn acquire(data: &Path) -> std::io::Result<Instance> {
