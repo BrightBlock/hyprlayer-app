@@ -146,7 +146,11 @@ fn answer(
         "key" => {
             let keystroke = text(request, "keystroke").unwrap_or_default().to_string();
             if text(request, "mode") == Some("compositor") {
-                return Answer::Later(Box::pin(compositor_key(keystroke)));
+                let focus = request
+                    .get("focus")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false);
+                return Answer::Later(Box::pin(compositor_key(keystroke, focus)));
             }
             let os = if cfg!(target_os = "macos") {
                 OperatingSystem::Mac
@@ -165,6 +169,8 @@ fn answer(
         }
         "state" => {
             let mut state = desktop.read(cx).dump(cx);
+            // A hidden window draws no frames, so `painted` is the last visible frame's.
+            state["visible"] = json!(window.update(cx, |_, w, _| w.is_visible()).unwrap_or(false));
             state["ok"] = json!(true);
             state
         }
@@ -213,7 +219,8 @@ fn bounds(b: gpui::Bounds<gpui::Pixels>) -> Value {
     })
 }
 
-fn click(window: &mut Window, position: gpui::Point<gpui::Pixels>, cx: &mut App) {
+/// The `click` op's events, public so the E2E tier clicks the same way.
+pub fn click(window: &mut Window, position: gpui::Point<gpui::Pixels>, cx: &mut App) {
     let modifiers = Modifiers::default();
     window.dispatch_event(
         PlatformInput::MouseMove(MouseMoveEvent {
@@ -281,6 +288,7 @@ fn capture(path: String, window: AnyWindowHandle, cx: &mut App) -> Later {
         )
         .await;
         done["path"] = json!(path);
+        done["window"] = json!(number);
         done
     })
 }
@@ -342,7 +350,7 @@ async fn hyprland_geometry() -> Result<String, String> {
 
 /// A key the compositor delivers, with a real input serial, which Wayland requires before it
 /// lets a client set the clipboard. Hyprland only; the G1 record proved the Lua form.
-async fn compositor_key(keystroke: String) -> Value {
+async fn compositor_key(keystroke: String, focus: bool) -> Value {
     if std::env::var_os("HYPRLAND_INSTANCE_SIGNATURE").is_none() {
         return failed("compositor keys need Hyprland (HYPRLAND_INSTANCE_SIGNATURE is unset)");
     }
@@ -368,11 +376,19 @@ async fn compositor_key(keystroke: String) -> Value {
         k => k.to_string(),
     };
     let pid = std::process::id();
+    // Opt-in, since it moves the user's focus; the G1 probe focused first and proved one modifier.
+    let focused = if focus {
+        let dispatch = format!("hl.dsp.focus({{ window = \"pid:{pid}\" }})");
+        run("hyprctl", &["dispatch".into(), dispatch]).await
+    } else {
+        Value::Null
+    };
     let lua = format!(
         "hl.dsp.send_shortcut({{ mods = \"{}\", key = \"{key}\", window = \"pid:{pid}\" }})",
         mods.join(" ")
     );
     let mut done = run("hyprctl", &["dispatch".into(), lua.clone()]).await;
     done["dispatched"] = json!(lua);
+    done["focus"] = focused;
     done
 }
