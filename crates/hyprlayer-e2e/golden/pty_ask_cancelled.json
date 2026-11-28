@@ -1,0 +1,92 @@
+{
+  "scenario": "pty_ask_cancelled",
+  "steps": [
+    {
+      "guards": [
+        {
+          "evidence": {
+            "state": "idle"
+          },
+          "guard": "it starts idle",
+          "ok": true
+        }
+      ],
+      "step": "the lead spawns a hooked PTY claude"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "opened": true,
+            "refusal": "agent_control_denied: agent control refused this: that agent is asking its user something, and a message now would answer it",
+            "typedSince": 0
+          },
+          "guard": "while it reads awaiting_question, a message is refused and nothing reaches the TUI",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "lastHook": "PreToolUse exit=0",
+            "state": "idle",
+            "stopped": "\"stopped\""
+          },
+          "guard": "with no hook after the Esc, the agent's input box on screen settles it idle",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "sent": "\"sent\"",
+            "typed": true
+          },
+          "guard": "a message after the cancel is typed into the TUI",
+          "ok": true
+        }
+      ],
+      "step": "question: cancelled by stop_agent"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "opened": true,
+            "refusal": "agent_control_denied: agent control refused this: that agent is asking its user something, and a message now would answer it",
+            "typedSince": 0
+          },
+          "guard": "while it reads awaiting_permission, a message is refused and nothing reaches the TUI",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "lastHook": "PermissionRequest exit=0",
+            "state": "idle",
+            "stopped": "\"stopped\""
+          },
+          "guard": "with no hook after the Esc, the agent's input box on screen settles it idle",
+          "ok": true
+        },
+        {
+          "evidence": {
+            "sent": "\"sent\"",
+            "typed": true
+          },
+          "guard": "a message after the cancel is typed into the TUI",
+          "ok": true
+        }
+      ],
+      "step": "ask: cancelled by stop_agent"
+    },
+    {
+      "guards": [
+        {
+          "evidence": {
+            "refusal": "agent_control_denied: agent control refused this: that agent is asking its user something, and a message now would answer it",
+            "state": "awaiting_question"
+          },
+          "guard": "past the settle it still reads awaiting_question, and a message is refused",
+          "ok": true
+        }
+      ],
+      "step": "a question still on screen keeps refusing messages"
+    }
+  ]
+}

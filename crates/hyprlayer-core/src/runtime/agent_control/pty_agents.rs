@@ -935,7 +935,7 @@ fn unprompt(agent: &mut PtyAgent) {
 fn settles(state: PtyAgentState, mirrored: bool) -> bool {
     match state {
         PtyAgentState::Working => true,
-        PtyAgentState::AwaitingPermission => mirrored,
+        PtyAgentState::AwaitingPermission | PtyAgentState::AwaitingQuestion => mirrored,
         _ => false,
     }
 }
